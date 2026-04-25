@@ -1,0 +1,5 @@
+cleaned_job_data.csv
+data/processed_jobs.csv
+*.pkl
+__pycache__/
+.ipynb_checkpoints/
