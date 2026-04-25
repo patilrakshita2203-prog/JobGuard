@@ -18,9 +18,8 @@ from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
 
-# -------------------------------
 # NLTK Downloads
-# -------------------------------
+
 REQUIRED_NLTK_PACKAGES = [
     "stopwords",
     "punkt",
@@ -36,16 +35,14 @@ for pkg in REQUIRED_NLTK_PACKAGES:
         pass
 
 
-# -------------------------------
 # Logging
-# -------------------------------
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# -------------------------------
 # Scam Indicators
-# -------------------------------
+
 SCAM_INDICATORS = [
     "urgent",
     "immediate",
@@ -76,10 +73,8 @@ SCAM_INDICATORS = [
     "prize money"
 ]
 
-
-# -------------------------------
 # Text Cleaner Class
-# -------------------------------
+
 class TextCleaner:
     """
     Cleans raw job posting text and extracts useful fraud-related features.
@@ -176,10 +171,8 @@ class TextCleaner:
 
         return text
 
-
-# -------------------------------
 # Data Preprocessor Class
-# -------------------------------
+
 class DataPreprocessor:
     """
     Full preprocessing pipeline for fake job posting dataset.
@@ -257,10 +250,8 @@ class DataPreprocessor:
 
         return df, X, y
 
-
-# -------------------------------
 # Main Run
-# -------------------------------
+
 if __name__ == "__main__":
     preprocessor = DataPreprocessor()
 
