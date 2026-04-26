@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-04-26T20:26:06.192750",
+  "model": "Hybrid TF-IDF + BERT + Logistic Regression",
+  "metrics": {
+    "f1_score": 0.7549,
+    "precision": 0.6553,
+    "recall": 0.8902,
+    "roc_auc": 0.9834,
+    "confusion_matrix": [
+      [
+        3322,
+        81
+      ],
+      [
+        19,
+        154
+      ]
+    ],
+    "classification_report": {
+      "0": {
+        "precision": 0.9943130799161928,
+        "recall": 0.9761974728181017,
+        "f1-score": 0.9851720047449585,
+        "support": 3403.0
+      },
+      "1": {
+        "precision": 0.6553191489361702,
+        "recall": 0.8901734104046243,
+        "f1-score": 0.7549019607843137,
+        "support": 173.0
+      },
+      "accuracy": 0.9720357941834452,
+      "macro avg": {
+        "precision": 0.8248161144261814,
+        "recall": 0.933185441611363,
+        "f1-score": 0.8700369827646361,
+        "support": 3576.0
+      },
+      "weighted avg": {
+        "precision": 0.977913205738468,
+        "recall": 0.9720357941834452,
+        "f1-score": 0.9740319830432829,
+        "support": 3576.0
+      }
+    }
+  }
+}

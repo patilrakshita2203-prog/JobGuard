@@ -1,7 +1,7 @@
 import streamlit as st
 import joblib
 from sentence_transformers import SentenceTransformer
-
+from models.predictor import JobPredictor
 # Load model
 clf = joblib.load("models/fake_job_model.pkl")
 
