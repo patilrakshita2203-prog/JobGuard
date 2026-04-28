@@ -6,7 +6,6 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 
-# Root path access
 sys.path.append(
     os.path.abspath(
         os.path.join(os.path.dirname(__file__), "../..")
@@ -16,38 +15,34 @@ sys.path.append(
 from predictor import JobPredictor
 from shap_explainer import SHAPExplainer
 
-# Load prediction model
 predictor = JobPredictor.load(
     model_path="models/best_model.joblib",
     vectorizer_path="models/tfidf_vectorizer.joblib"
 )
 
-# Load SHAP explainer
 explainer = SHAPExplainer.load(
     model_path="models/best_model.joblib",
     vectorizer_path="models/tfidf_vectorizer.joblib"
 )
 
-# Chrome setup
 options = Options()
 options.add_argument("--start-maximized")
 
 driver = webdriver.Chrome(options=options)
 
-# Open Naukri jobs page
-url = "https://www.naukri.com/software-engineer-jobs?k=software%20engineer"
+url = "https://internshala.com/jobs/software-development-jobs"
 driver.get(url)
 
-time.sleep(10)
+time.sleep(15)
 
-# Find job cards
 cards = driver.find_elements(
     By.XPATH,
-    "//div[contains(@class,'cust-job-tuple')]"
+    "//div[contains(@class,'container-fluid individual_internship')]"
 )
 
-print(f"\nCards found: {len(cards)}")
-print("\nReal Time Jobs + Fake Job Detection:\n")
+print(f"Cards found: {len(cards)}")
+print(f"\nInternshala Cards found: {len(cards)}")
+print("\nInternshala Real Time Jobs + Fake Detection:\n")
 
 count = 0
 
@@ -73,23 +68,14 @@ for card in cards[:10]:
             "review",
             "few hours",
             "few",
-            "hours",
-            "full",
-            "minimum",
-            "type",
-            "click",
-            "job",
             "description",
             "alignment",
             "clear",
-            "internship"
+            "hours"
         ]
 
         for word in remove_words:
             job_text = job_text.replace(word, "")
-
-        # Remove symbols and numbers
-        job_text = re.sub(r"[^a-zA-Z\s]", " ", job_text)
 
         # Clean extra spaces
         job_text = " ".join(job_text.split())
@@ -146,10 +132,6 @@ for card in cards[:10]:
         if shap_result["top_fake_words"]:
             for word, score in shap_result["top_fake_words"][:3]:
                 print(f"⚠ {word} ({round(score, 3)})")
-
-        elif shap_result["top_real_words"]:
-            for word, score in shap_result["top_real_words"][:3]:
-                print(f"✅ {word} ({round(score, 3)})")
 
         print("-" * 60)
 
