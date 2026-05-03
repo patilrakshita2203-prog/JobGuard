@@ -3,3 +3,11 @@ data/processed_jobs.csv
 *.pkl
 __pycache__/
 .ipynb_checkpoints/
+# Ignore models (large files)
+models/*.joblib
+
+# Ignore database
+data/*.db
+
+# Ignore large datasets
+*.csv
