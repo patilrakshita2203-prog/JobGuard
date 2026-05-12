@@ -1,7 +1,6 @@
 import logging
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 import joblib
 import sys
@@ -17,7 +16,7 @@ from pydantic import BaseModel
 import pandas as pd
 import io
 
-# Local imports (from root)
+# Local imports
 from data_cleaning import TextCleaner
 from shap_explainer import SHAPExplainer
 
@@ -54,6 +53,7 @@ async def load_models():
         explainer.build_explainer()
 
         logger.info("Models loaded successfully")
+
     except Exception as e:
         logger.warning(f"Model load error: {e}")
 
@@ -93,42 +93,88 @@ def health():
 
 @app.post("/predict", response_model=PredictionResult)
 async def predict(job: JobInput):
-    if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+    try:
+        if model is None:
+            raise HTTPException(status_code=503, detail="Model not loaded")
 
-    raw_text = " ".join([
-        job.title, job.company_profile, job.description,
-        job.requirements, job.benefits
-    ])
+        raw_text = " ".join([
+            job.title, job.company_profile, job.description,
+            job.requirements, job.benefits
+        ])
 
-    cleaned = cleaner.clean(raw_text)
+        cleaned = cleaner.clean(raw_text)
 
-    result = explainer.explain_single(raw_text, cleaned)
-    trust = explainer.get_trust_score(result)
+        result = explainer.explain_single(raw_text, cleaned)
+        trust = explainer.get_trust_score(result)
 
-    prob = result["probability_fake"]
-    if prob >= 0.8:
-        risk = "HIGH"
-    elif prob >= 0.5:
-        risk = "MEDIUM"
-    elif prob >= 0.3:
-        risk = "LOW"
-    else:
-        risk = "SAFE"
+        prob = result["probability_fake"]
 
-    _log(job.dict(), result)
+        # Risk level
+        if prob >= 0.8:
+            risk = "HIGH"
+        elif prob >= 0.5:
+            risk = "MEDIUM"
+        elif prob >= 0.3:
+            risk = "LOW"
+        else:
+            risk = "SAFE"
 
-    return PredictionResult(
-        prediction=result["prediction"],
-        confidence=result["confidence"],
-        probability_fake=result["probability_fake"],
-        trust_score=trust,
-        top_fake_words=result.get("top_fake_words", [])[:10],
-        top_genuine_words=result.get("top_genuine_words", [])[:10],
-        highlighted_html=result["highlighted_html"],
-        risk_level=risk,
-        timestamp=datetime.now().isoformat()
-    )
+        # FIX: show only relevant words
+        if result["prediction"] == "FAKE":
+            top_fake_words = result.get("top_fake_words", [])[:10]
+            top_genuine_words = []
+        else:
+            top_fake_words = []
+            top_genuine_words = result.get("top_genuine_words", [])[:10]
+
+        fake_words = [w[0] for w in top_fake_words[:5]]
+        genuine_words = [w[0] for w in top_genuine_words[:5]]
+
+        # Clean explanation output
+        if result["prediction"] == "FAKE":
+            highlighted_html = f"""
+🚨 Fake Job Detected
+
+🔴 Top Fake Indicators:
+{', '.join(fake_words) if fake_words else 'None'}
+
+📊 Risk Score:
+{round(prob * 100, 2)}% likelihood of being fake
+
+⚠️ Recommendation:
+Avoid applying. This job shows strong scam indicators.
+"""
+        else:
+            highlighted_html = f"""
+✅ Genuine Job Detected
+
+🟢 Trust Indicators:
+{', '.join(genuine_words) if genuine_words else 'Low risk, no strong fake signals detected'}
+
+📊 Confidence:
+{round((1 - prob) * 100, 2)}% chance of being genuine
+
+💡 Recommendation:
+This job appears safe, but always verify company details.
+"""
+
+        _log(job.dict(), result)
+
+        return PredictionResult(
+            prediction=result["prediction"],
+            confidence=result["confidence"],
+            probability_fake=result["probability_fake"],
+            trust_score=trust,
+            top_fake_words=top_fake_words,
+            top_genuine_words=top_genuine_words,
+            highlighted_html=highlighted_html,
+            risk_level=risk,
+            timestamp=datetime.now().isoformat()
+        )
+
+    except Exception as e:
+        logger.error(e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/predict/batch")
@@ -156,13 +202,13 @@ async def predict_batch(file: UploadFile = File(...)):
             str(row.get(c, "")) for c in
             ["title", "company_profile", "description", "requirements"]
         ])
-        cleaned = cleaner.clean(raw)
 
+        cleaned = cleaner.clean(raw)
         X = vectorizer.transform([cleaned])
         prob = float(model.predict_proba(X)[0][1])
 
         results.append({
-            "prediction": "FAKE" if prob >= 0.5 else "GENUINE",
+            "prediction": "FAKE" if prob >= 0.5 else "REAL",
             "probability_fake": round(prob, 4),
             "trust_score": int((1 - prob) * 100),
             "risk_level": "HIGH" if prob >= 0.8 else ("MEDIUM" if prob >= 0.5 else "SAFE")
