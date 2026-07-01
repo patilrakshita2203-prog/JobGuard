@@ -1138,13 +1138,14 @@ if st.button("🔴 START SCAN", type="primary", use_container_width=True):
                 result = predict(text)
 
                 live_results.append({
-                    "Title": job.title[:45],
-                    "Company": job.company[:35],
-                    "Location": job.location,
-                    "Salary": job.salary_range or "—",
-                    "Verdict": "🚨 SCAM" if result['prediction'] == "FAKE" else "✅ SAFE",
-                    "Risk": f"{result['probability_fake']*100:.0f}%"
-                })
+                "Title": job.title[:45],
+                "Company": job.company[:35],
+                "Location": job.location,
+                "Salary": job.salary_range or "—",
+                "Verdict": "🚨 SCAM" if result['prediction'] == "FAKE" else "✅ SAFE",
+                "Risk Score": f"{result['probability_fake']*100:.0f}%",
+                "Trust Score": f"{100 - (result['probability_fake']*100):.0f}%"
+                 })
 
             results_df = pd.DataFrame(live_results)
 
