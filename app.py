@@ -29,7 +29,8 @@ import time
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.explainability.knowledge_graph_realtime import RealTimeSkillKnowledgeGraph
 from data_cleaning import TextCleaner
-
+from src.explainability.rule_engine import analyze_job
+from src.explainability.prompt_builder import build_prompt
 # ═══════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ═══════════════════════════════════════════════════════════════
@@ -1132,10 +1133,17 @@ if st.button("🔴 START SCAN", type="primary", use_container_width=True):
             live_results = []
 
             for job in jobs:
+               
 
                 text = job.combined_text()
 
                 result = predict(text)
+                facts = analyze_job(job)
+                prompt = build_prompt(job, facts)
+
+                print(prompt)
+
+                print(facts)
 
                 live_results.append({
                 "Title": job.title[:45],
