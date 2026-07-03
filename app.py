@@ -31,6 +31,7 @@ from src.explainability.knowledge_graph_realtime import RealTimeSkillKnowledgeGr
 from data_cleaning import TextCleaner
 from src.explainability.rule_engine import analyze_job
 from src.explainability.prompt_builder import build_prompt
+from src.explainability.llm_analyzer import generate_ai_analysis
 # ═══════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ═══════════════════════════════════════════════════════════════
@@ -1136,12 +1137,15 @@ if st.button("🔴 START SCAN", type="primary", use_container_width=True):
                
 
                 text = job.combined_text()
-
                 result = predict(text)
+
                 facts = analyze_job(job)
+
                 prompt = build_prompt(job, facts)
 
-                print(prompt)
+                ai_analysis = generate_ai_analysis(prompt)
+
+                print(ai_analysis)
 
                 print(facts)
 
