@@ -1,0 +1,21 @@
+# Render Blueprint: deploys the FastAPI backend.  https://render.com/docs/blueprint-spec
+# The dashboard goes on Streamlit Community Cloud (see docs/DEPLOYMENT.md) and calls this API.
+services:
+  - type: web
+    name: jobguard-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.3
+      - key: GEMINI_API_KEY
+        sync: false            # paste it in the Render dashboard, never in git
+      - key: JOBGUARD_API_KEY
+        generateValue: true    # Render creates a random key; copy it into the dashboard's secrets
+      - key: JOBGUARD_CORS_ORIGINS
+        value: https://your-dashboard.streamlit.app
+      - key: JOBGUARD_LOG_PREDICTIONS
+        value: "false"         # free-tier disk is temporary, so skip the SQLite log
