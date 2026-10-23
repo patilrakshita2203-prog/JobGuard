@@ -10,7 +10,7 @@ JobGuard — Professional AI Fake Job Detection Dashboard v2.0
    - Smooth animations and micro-interactions
    - Professional color psychology for trust/warning
 
-Run: streamlit run src/dashboard/app.py
+Run: streamlit run app.py   (start the API first: uvicorn main:app --reload)
 """
 
 import streamlit as st
@@ -19,6 +19,7 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import joblib
+import os
 import sys
 import io
 from pathlib import Path
@@ -26,12 +27,16 @@ from datetime import datetime
 import time
 
 # Local imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.explainability.knowledge_graph_realtime import RealTimeSkillKnowledgeGraph
 from data_cleaning import TextCleaner
 from src.explainability.rule_engine import analyze_job
 from src.explainability.prompt_builder import build_prompt
-from src.explainability.llm_analyzer import generate_ai_analysis
+from src.explainability.llm_analyzer import generate_ai_analysis, analyze_job_risk
+from src.explainability.red_flags import detect_red_flags
+from src.explainability.job_posting import JobPostingLite
+import jobguard_config as cfg
+from api_client import JobGuardClient, ApiError
 # ═══════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ═══════════════════════════════════════════════════════════════
@@ -43,8 +48,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
     menu_items={
         "About": "JobGuard v2.0 — AI-Powered Employment Fraud Detection",
-        "Get Help": "https://github.com/YOUR_USERNAME/jobguard",
-        "Report a bug": "https://github.com/YOUR_USERNAME/jobguard/issues",
+        "Get Help": "https://github.com/patilrakshita2203-prog/JobGuard",
+        "Report a bug": "https://github.com/patilrakshita2203-prog/JobGuard/issues",
     }
 )
 
@@ -541,22 +546,22 @@ details summary::marker {
 def load_models():
     """Load ML model and vectorizer (cached)."""
     try:
-        model = joblib.load("models/best_model.joblib")
-        vectorizer = joblib.load("models/tfidf_vectorizer.joblib")
+        model = joblib.load(cfg.MODEL_PATH)
+        vectorizer = joblib.load(cfg.VECTORIZER_PATH)
         return model, vectorizer, True
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         return None, None, False
 
 
 @st.cache_resource
-def load_explainer(model, vectorizer):
-    """Load SHAP explainer (cached)."""
+def load_explainer(_model, _vectorizer):
+    """Load SHAP explainer (cached). Underscore args are not hashed by Streamlit."""
     try:
         from shap_explainer import SHAPExplainer
         exp = SHAPExplainer(
-            model=model,
-            vectorizer=vectorizer,
-            feature_names=list(vectorizer.get_feature_names_out())
+            model=_model,
+            vectorizer=_vectorizer,
+            feature_names=list(_vectorizer.get_feature_names_out())
         )
         exp.build_explainer()
         return exp
@@ -569,40 +574,238 @@ model, vectorizer, models_loaded = load_models()
 kg = RealTimeSkillKnowledgeGraph()
 
 # ═══════════════════════════════════════════════════════════════
+# BACKEND (FastAPI) CONNECTION
+# ═══════════════════════════════════════════════════════════════
+# The dashboard talks to the FastAPI backend (main.py) when it is reachable.
+# If it is not, and local model files exist, it falls back to running the model
+# inside this process (JOBGUARD_MODE=auto). Set JOBGUARD_MODE=api to require
+# the backend, or JOBGUARD_MODE=local to never call it.
+
+client = JobGuardClient(cfg.API_URL, cfg.API_KEY, timeout=30)
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def backend_status(url: str, mode: str) -> dict:
+    """Health of the FastAPI backend (cached for 20 s so reruns stay fast)."""
+    if mode == "local":
+        return {"reachable": False, "reason": "Local mode (JOBGUARD_MODE=local)"}
+    try:
+        return {"reachable": True, **client.health()}
+    except ApiError as exc:
+        return {"reachable": False, "reason": str(exc)}
+
+
+BACKEND = backend_status(cfg.API_URL, cfg.MODE)
+USE_API = bool(BACKEND.get("reachable")) and bool(BACKEND.get("model_loaded"))
+
+# ═══════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════
 
-def predict(text: str) -> dict:
-    """Run prediction on text."""
+def _risk_level(prob: float) -> str:
+    if prob >= 0.8:
+        return "HIGH"
+    if prob >= 0.5:
+        return "MEDIUM"
+    if prob >= 0.3:
+        return "LOW"
+    return "SAFE"
+
+
+def predict(text: str, fields: dict = None, explain: bool = True) -> dict:
+    """Score one posting.
+
+    Uses the FastAPI backend when it is reachable, otherwise the local model.
+    `fields` (title, company_profile, description, ...) can carry the form
+    inputs; without it the whole text is sent as the description.
+    """
+    if USE_API:
+        payload = dict(fields or {})
+        payload.setdefault("description", text)
+        try:
+            return client.predict(payload)
+        except ApiError as exc:
+            if exc.status_code is not None or cfg.MODE == "api" or not models_loaded:
+                st.error(f"❌ {exc}")
+                st.stop()
+            st.session_state["api_fallback"] = str(exc)  # backend dropped: run locally
+
     if not models_loaded:
-        import random
-        prob = random.uniform(0.1, 0.95)
-        return {
-            "prediction": "FAKE" if prob > 0.5 else "GENUINE",
-            "probability_fake": prob,
-            "confidence": abs(prob - 0.5) * 2,
-            "trust_score": int((1 - prob) * 100),
-            "top_fake_words": [("urgent", 0.8), ("fee", 0.6), ("guaranteed", 0.5), ("investment", 0.4)],
-            "top_genuine_words": [("experience", 0.7), ("skills", 0.5), ("interview", 0.4)],
-            "highlighted_html": text[:500],
-            "demo_mode": True
-        }
+        if cfg.DEMO_MODE:  # explicit opt-in only: this returns RANDOM output
+            import random
+            prob = random.uniform(0.1, 0.95)
+            return {
+                "prediction": "FAKE" if prob > 0.5 else "GENUINE",
+                "probability_fake": prob,
+                "confidence": abs(prob - 0.5) * 2,
+                "trust_score": int((1 - prob) * 100),
+                "risk_level": _risk_level(prob),
+                "top_fake_words": [], "top_genuine_words": [],
+                "highlighted_html": text[:500], "demo_mode": True,
+            }
+        st.error("❌ No model available. Start the API or add the model files to `models/`.")
+        st.stop()
 
     cleaned = cleaner.clean(text)
     X = vectorizer.transform([cleaned])
     prob = float(model.predict_proba(X)[0][1])
     prediction = "FAKE" if prob >= 0.5 else "GENUINE"
 
+    top_fake, top_genuine = [], []
+    if explain:
+        explainer = load_explainer(model, vectorizer)
+        if explainer is not None:
+            try:
+                shap_result = explainer.explain_single(text, cleaned)
+                if prediction == "FAKE":
+                    top_fake = shap_result.get("top_fake_words", [])[:10]
+                else:
+                    top_genuine = shap_result.get("top_real_words", [])[:10]
+            except Exception:
+                pass  # explanation is optional; the verdict still stands
+
     return {
         "prediction": prediction,
         "probability_fake": round(prob, 4),
         "confidence": round(abs(prob - 0.5) * 2, 4),
         "trust_score": int((1 - prob) * 100),
-        "top_fake_words": [],
-        "top_genuine_words": [],
+        "risk_level": _risk_level(prob),
+        "top_fake_words": top_fake,
+        "top_genuine_words": top_genuine,
         "highlighted_html": text[:500],
         "demo_mode": False
     }
+
+
+def run_ai_analysis(job: dict, probability_fake: float, verify_company: bool = False) -> dict:
+    """Rule-engine facts + Gemini (or rule-based) summary, via the API when possible.
+
+    `job` keys: title, company, location, salary_range, description,
+    requirements, benefits, experience.
+    Returns {"analysis": str, "source": str, "facts": dict, "red_flags": list}.
+    """
+    if USE_API:
+        try:
+            data = client.analyze({
+                "title": job.get("title", ""),
+                "company_profile": job.get("company", ""),
+                "description": job.get("description", ""),
+                "requirements": job.get("requirements", ""),
+                "benefits": job.get("benefits", ""),
+                "salary_range": job.get("salary_range", ""),
+                "location": job.get("location", ""),
+                "experience": job.get("experience", ""),
+                "verify_company": verify_company,
+            })
+            return {"analysis": data["analysis"], "source": data["analysis_source"],
+                    "facts": data.get("facts", {}), "red_flags": data.get("red_flags", [])}
+        except ApiError as exc:
+            if exc.status_code is not None or cfg.MODE == "api":
+                st.error(f"❌ {exc}")
+                return {}
+            st.session_state["api_fallback"] = str(exc)
+
+    posting = JobPostingLite(**{k: (job.get(k) or "") for k in (
+        "title", "company", "location", "salary_range", "description",
+        "requirements", "benefits", "experience")})
+    facts = analyze_job(posting, verify_company=verify_company)
+    ai = analyze_job_risk(posting, facts, probability_fake=probability_fake)
+    return {"analysis": ai["analysis"], "source": ai["source"],
+            "facts": {k: v for k, v in facts.items() if k != "red_flags"},
+            "red_flags": facts["red_flags"]}
+
+
+def run_bulk(df: pd.DataFrame, raw_bytes: bytes, filename: str) -> dict:
+    """Score every row of an uploaded CSV (API batch endpoint, else local loop)."""
+    results_df = df.copy()
+    probs = None
+
+    if USE_API:
+        try:
+            out = client.predict_batch(raw_bytes, filename)
+            if len(out) == len(df):
+                # the API appends: prediction, probability_fake, trust_score, risk_level
+                res = out.iloc[:, -4:]
+                results_df["PREDICTION"] = res.iloc[:, 0].map({"REAL": "GENUINE"}).fillna(res.iloc[:, 0]).values
+                probs = res.iloc[:, 1].astype(float).tolist()
+                results_df["FRAUD_RISK_%"] = [round(p * 100, 1) for p in probs]
+                results_df["TRUST_SCORE"] = res.iloc[:, 2].astype(int).values
+        except ApiError as exc:
+            if exc.status_code is not None or cfg.MODE == "api" or not models_loaded:
+                st.error(f"❌ {exc}")
+                return {}
+            st.session_state["api_fallback"] = str(exc)
+
+    if probs is None:  # local fallback (the original per-row loop)
+        predictions = []
+        progress_bar = st.progress(0)
+        for i, (_, row) in enumerate(df.iterrows()):
+            text_parts = []
+            for col in ['title', 'company_profile', 'description', 'requirements', 'benefits']:
+                if col in df.columns:
+                    text_parts.append(str(row.get(col, '') or ''))
+            predictions.append(predict(' '.join(text_parts), explain=False))
+            progress_bar.progress((i + 1) / len(df))
+        results_df['PREDICTION'] = [r['prediction'] for r in predictions]
+        results_df['FRAUD_RISK_%'] = [round(r['probability_fake'] * 100, 1) for r in predictions]
+        results_df['TRUST_SCORE'] = [r['trust_score'] for r in predictions]
+        probs = [r['probability_fake'] for r in predictions]
+
+    # START TABLE FROM 1 INSTEAD OF 0
+    results_df.index = range(1, len(results_df) + 1)
+    n_fake = int((results_df['PREDICTION'] == 'FAKE').sum())
+    return {"file": filename, "df": results_df, "n_fake": n_fake,
+            "total": len(results_df), "avg_risk": float(np.mean(probs)) if probs else 0.0}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_training_results(use_api: bool) -> dict:
+    """Training metrics: from the API when connected, else from models/training_results.json."""
+    if use_api:
+        try:
+            data = client.stats()
+            if "models" in data:
+                return data
+        except ApiError:
+            pass
+    try:
+        import json
+        with open(cfg.TRAINING_RESULTS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
+def top_scam_terms(n: int = 10):
+    """Terms the model links most strongly to fake postings (from its coefficients)."""
+    if not models_loaded or not hasattr(model, "coef_"):
+        return []
+    names = vectorizer.get_feature_names_out()
+    coefs = model.coef_[0]
+    idx = np.argsort(coefs)[::-1][:n]
+    return [(names[i], float(coefs[i])) for i in idx]
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def read_history(limit: int = 20):
+    """Recent predictions logged by the API (HTTP), or straight from the SQLite file."""
+    if USE_API:
+        try:
+            return client.history(limit)
+        except ApiError:
+            return []
+    try:
+        import sqlite3
+        conn = sqlite3.connect(cfg.DB_PATH)
+        try:
+            rows = conn.execute(
+                "SELECT timestamp, prediction, probability, title FROM predictions ORDER BY id DESC LIMIT ?",
+                (limit,)).fetchall()
+        finally:
+            conn.close()
+        return [{"timestamp": r[0], "prediction": r[1], "probability_fake": r[2], "title": r[3]} for r in rows]
+    except Exception:
+        return []
 
 
 def trust_meter_chart(trust_score: int):
@@ -679,21 +882,38 @@ def shap_bar_chart(result: dict):
 with st.sidebar:
     st.markdown('<div class="sidebar-header">🛡️ JobGuard Pro</div>', unsafe_allow_html=True)
 
-    if not models_loaded:
-        st.error("⚠️ Models not loaded")
-        st.info("Run: `python src/models/train.py` to train models")
+    if USE_API:
+        st.success("✅ FastAPI backend connected")
+        st.caption(
+            f"{cfg.API_URL} · v{BACKEND.get('version', '?')} · "
+            f"SHAP {'on' if BACKEND.get('explainer_loaded') else 'off'} · "
+            f"Gemini {'on' if BACKEND.get('llm_configured') else 'off (rule-based fallback)'}"
+        )
+    elif models_loaded:
+        st.warning("🟡 Local mode — backend not reachable")
+        st.caption(f"{BACKEND.get('reason', '')}. Start it with `uvicorn main:app --reload`.")
     else:
-        st.success("✅ Models Ready")
+        st.error("⚠️ Models not loaded")
+        st.info("Add `models/best_model.joblib` and `models/tfidf_vectorizer.joblib`, "
+                "or train them with `python model_training.py`.")
+    if st.session_state.get("api_fallback"):
+        st.caption("⚠️ The backend dropped mid-session; using the local model.")
+    if st.button("🔄 Re-check backend", key="recheck_backend"):
+        backend_status.clear()
+        st.rerun()
 
     st.markdown("---")
     st.markdown("### 📊 System Status")
 
+    _best_f1_raw = load_training_results(USE_API).get("best_f1")
+    _best_f1 = f"{_best_f1_raw:.2f}" if isinstance(_best_f1_raw, (int, float)) else "—"
+
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown('''
+        st.markdown(f'''
         <div class="sidebar-metric">
-            <div class="sidebar-metric-value">91%</div>
-            <div class="sidebar-metric-label">Target F1-Score</div>
+            <div class="sidebar-metric-value">{_best_f1}</div>
+            <div class="sidebar-metric-label">Test F1-Score</div>
         </div>
         ''', unsafe_allow_html=True)
     with col2:
@@ -722,7 +942,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 🔗 Quick Links")
-    st.markdown("[📘 GitHub Repo](https://github.com/YOUR_USERNAME/jobguard)")
+    st.markdown("[📘 GitHub Repo](https://github.com/patilrakshita2203-prog/JobGuard)")
     st.markdown("[🔴 Report Cybercrime](https://cybercrime.gov.in)")
     st.markdown("[📞 NASSCOM Helpline](https://nasscom.in)")
     st.markdown("[📊 Kaggle Dataset](https://www.kaggle.com/datasets/shivamb/real-or-fake-fake-jobposting-prediction)")
@@ -737,11 +957,29 @@ st.markdown("""
     <h1>🛡️ JobGuard Pro</h1>
     <p>Enterprise AI-Powered Fake Job Detection</p>
     <p style="font-size:0.95rem;opacity:0.8;margin-top:1rem;">
-        NLP • XGBoost • SHAP Explainability • Real-Time Scraping • PDF Reports
+        NLP • TF-IDF + Logistic Regression • SHAP Explainability • FastAPI • PDF Reports
     </p>
     <div class="header-badge">v2.0 — Production Ready</div>
 </div>
 """, unsafe_allow_html=True)
+
+
+# Stop early, with a clear message, when there is nothing to score with
+if cfg.MODE == "api" and not USE_API:
+    st.error(
+        f"The dashboard is in API-only mode (JOBGUARD_MODE=api) but the FastAPI backend at "
+        f"{cfg.API_URL} is not reachable. Start it with `uvicorn main:app --reload`, "
+        f"or set JOBGUARD_MODE=auto to fall back to the local model."
+    )
+    st.stop()
+
+if not USE_API and not models_loaded and not cfg.DEMO_MODE:
+    st.error(
+        "No model is available. Start the FastAPI backend (`uvicorn main:app --reload`) "
+        "or add `models/best_model.joblib` and `models/tfidf_vectorizer.joblib` "
+        "(train them with `python model_training.py`)."
+    )
+    st.stop()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -768,19 +1006,21 @@ with tab1:
     col_input, col_output = st.columns([2, 1.5])
 
     with col_input:
+        _demo = st.session_state.get('demo_data', {})
         with st.form("analyze_form", clear_on_submit=False):
-            job_title = st.text_input("📋 Job Title", placeholder="e.g., Software Engineer, Data Analyst")
-            company = st.text_input("🏢 Company Name", placeholder="e.g., Infosys, TCS")
+            job_title = st.text_input("📋 Job Title", value=_demo.get("title", ""), placeholder="e.g., Software Engineer, Data Analyst")
+            company = st.text_input("🏢 Company Name", value=_demo.get("company", ""), placeholder="e.g., Infosys, TCS")
 
             col_a, col_b = st.columns(2)
             with col_a:
-                salary = st.text_input("💰 Salary/Stipend", placeholder="e.g., 6-9 LPA")
+                salary = st.text_input("💰 Salary/Stipend", value=_demo.get("salary", ""), placeholder="e.g., 6-9 LPA")
             with col_b:
                 location = st.text_input("📍 Location", placeholder="e.g., Bangalore, Remote")
 
             description = st.text_area(
                 "📝 Job Description *",
                 height=200,
+                value=_demo.get("description", ""),
                 placeholder="Paste the complete job description here...",
             )
 
@@ -831,13 +1071,37 @@ with tab1:
 
     if analyze_btn and description:
         combined = f"{job_title} {company} {description} {requirements} {benefits}"
-        result = predict(combined)
-        # Knowledge Graph Analysis
-        kg_result = kg.analyze_job_posting(
-            job_title=job_title,
-            job_description=description,
-            claimed_salary=0
-        )
+        with st.spinner("Analyzing..."):
+            result = predict(combined, fields={
+                "title": job_title, "company_profile": company, "description": description,
+                "requirements": requirements, "benefits": benefits,
+                "salary_range": salary, "location": location,
+                "telecommuting": int(work_from_home), "has_company_logo": int(has_logo),
+            })
+            # Knowledge Graph Analysis
+            kg_result = kg.analyze_job_posting(
+                job_title=job_title,
+                job_description=description,
+                claimed_salary=0
+            )
+        # keep everything in session_state: buttons inside the results (PDF,
+        # AI analysis) trigger a rerun, which would otherwise wipe the results
+        st.session_state['single'] = {
+            "result": result,
+            "kg_result": kg_result,
+            "red_flags": result.get("red_flags") or detect_red_flags(combined, company),
+            "job": {"title": job_title, "company": company, "location": location,
+                    "salary_range": salary, "description": description,
+                    "requirements": requirements, "benefits": benefits},
+            "ai": None,
+        }
+    elif analyze_btn:
+        st.warning("⚠️ Please enter at least the Job Description.")
+
+    _single = st.session_state.get('single')
+    if _single:
+        result = _single["result"]
+        kg_result = _single["kg_result"]
 
         with results_placeholder.container():
             # VERDICT
@@ -935,6 +1199,28 @@ with tab1:
                     for word, score in result.get("top_genuine_words", [])[:8]:
                         st.markdown(f'<span class="word-genuine">{word}</span>', unsafe_allow_html=True)
 
+            # RED FLAGS (rule-based, English + Hindi keywords)
+            st.markdown("---")
+            st.markdown("### 🚩 Scam Red Flags")
+            _flags = _single.get("red_flags") or []
+            if _flags:
+                for _f in _flags:
+                    _icon = {"high": "🔴", "medium": "🟠", "low": "🟡"}.get(_f["severity"], "🟡")
+                    st.markdown(f"{_icon} **{_f['label']}** — _“{_f['evidence']}”_")
+            else:
+                st.success("No rule-based scam red flags found in the text.")
+
+            # AI RISK ANALYSIS (Gemini, with a rule-based fallback)
+            st.markdown("### 🧠 AI Risk Analysis")
+            _verify = st.checkbox("Also verify the company website online (slower)", key="verify_company_single")
+            if st.button("Generate AI Risk Analysis", key="ai_single"):
+                with st.spinner("Generating AI analysis..."):
+                    _single["ai"] = run_ai_analysis(_single["job"], result["probability_fake"], verify_company=_verify)
+            if _single.get("ai"):
+                st.markdown(_single["ai"]["analysis"])
+                st.caption("Source: Gemini" if _single["ai"]["source"] in ("gemini", "cache")
+                           else "Source: rule-based summary (Gemini unavailable or not configured)")
+
             # PDF REPORT
             st.markdown("---")
             if st.button("📄 Generate PDF Report", use_container_width=False):
@@ -956,8 +1242,6 @@ with tab1:
                 except Exception as e:
                     st.error(f"PDF generation error: {e}")
 
-    elif analyze_btn:
-        st.warning("⚠️ Please enter at least the Job Description.")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -984,117 +1268,79 @@ with tab2:
 
     uploaded_file = st.file_uploader("📤 Upload CSV File", type=['csv'])
 
-if uploaded_file:
+    if uploaded_file:
+        raw_bytes = uploaded_file.getvalue()
+        try:
+            df = pd.read_csv(io.BytesIO(raw_bytes))
+        except Exception as e:
+            st.error(f"❌ Could not read this CSV: {e}")
+            df = None
 
-    df = pd.read_csv(uploaded_file)
+        if df is not None:
+            st.info(f"📊 Loaded {len(df)} job postings")
 
-    st.info(f"📊 Loaded {len(df)} job postings")
+            with st.expander("Preview", expanded=True):
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    height=500
+                )
 
-    with st.expander("Preview", expanded=True):
+            if 'description' not in df.columns:
+                st.error("❌ CSV must have 'description' column")
+
+            elif st.button("🚀 Analyze All Jobs", type="primary", use_container_width=True):
+                with st.spinner(f"Analyzing {len(df)} postings..."):
+                    st.session_state['bulk'] = run_bulk(df, raw_bytes, uploaded_file.name)
+
+    # results live in session_state so the download button does not wipe them
+    bulk = st.session_state.get('bulk')
+    if bulk and uploaded_file and bulk.get("file") == uploaded_file.name:
+        results_df = bulk["df"]
+        n_fake = bulk["n_fake"]
+
+        st.success(f"✅ Analysis Complete — {n_fake} suspicious jobs found")
+
         st.dataframe(
-            df,
+            results_df,
             use_container_width=True,
             height=500
         )
+        # SUMMARY STATS
+        st.markdown("---")
+        st.markdown("### 📈 Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        col1.markdown(f'<div class="metric-card"><div class="metric-value">{bulk["total"]}</div><div class="metric-label">Total Analyzed</div></div>', unsafe_allow_html=True)
+        col2.markdown(f'<div class="metric-card"><div class="metric-value" style="color:#e63946;">{n_fake}</div><div class="metric-label">Scams Found</div></div>', unsafe_allow_html=True)
+        col3.markdown(f'<div class="metric-card"><div class="metric-value" style="color:#06a77d;">{bulk["total"]-n_fake}</div><div class="metric-label">Safe Jobs</div></div>', unsafe_allow_html=True)
+        col4.markdown(f'<div class="metric-card"><div class="metric-value">{bulk["avg_risk"]*100:.1f}%</div><div class="metric-label">Avg Risk</div></div>', unsafe_allow_html=True)
 
-    if 'description' not in df.columns:
-        st.error("❌ CSV must have 'description' column")
+        # CHART
+        verdict_data = pd.DataFrame({
+            'Status': ['Safe', 'Scam'],
+            'Count': [bulk["total"] - n_fake, n_fake]
+        })
+        fig = px.pie(
+            verdict_data, values='Count', names='Status',
+            color_discrete_map={'Scam': '#e63946', 'Safe': '#06a77d'},
+            title='Distribution'
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    else:
-        if st.button("🚀 Analyze All Jobs", type="primary", use_container_width=True):
+        # DETAILED TABLE
+        st.markdown("### 🔍 Detailed Results")
+        display_cols = ['PREDICTION', 'FRAUD_RISK_%', 'TRUST_SCORE'] + [c for c in ['title', 'description'] if c in results_df.columns]
+        st.dataframe(results_df[display_cols], use_container_width=True)
 
-            with st.spinner(f"Analyzing {len(df)} postings..."):
-
-                predictions = []
-                progress_bar = st.progress(0)
-
-                for i, (_, row) in enumerate(df.iterrows()):
-
-                    text_parts = []
-
-                    for col in [
-                        'title',
-                        'company_profile',
-                        'description',
-                        'requirements',
-                        'benefits'
-                    ]:
-                        if col in df.columns:
-                            text_parts.append(str(row.get(col, '') or ''))
-
-                    combined = ' '.join(text_parts)
-
-                    result = predict(combined)
-
-                    predictions.append(result)
-
-                    progress_bar.progress((i + 1) / len(df))
-
-                results_df = df.copy()
-
-                results_df['PREDICTION'] = [
-                r['prediction'] for r in predictions
-            ]
-
-                results_df['FRAUD_RISK_%'] = [
-                round(r['probability_fake'] * 100, 1)
-                for r in predictions
-            ]
-
-                results_df['TRUST_SCORE'] = [
-                r['trust_score'] for r in predictions
-            ]
-
-            # START TABLE FROM 1 INSTEAD OF 0
-                results_df.index = range(1, len(results_df) + 1)
-
-                n_fake = sum(
-                1 for r in predictions
-                if r['prediction'] == 'FAKE'
-            )
-
-                st.success(f"✅ Analysis Complete — {n_fake} suspicious jobs found")
-
-                st.dataframe(
-                results_df,
-                use_container_width=True,
-                height=500
-            )
-                # SUMMARY STATS
-                st.markdown("---")
-                st.markdown("### 📈 Summary")
-                col1, col2, col3, col4 = st.columns(4)
-                col1.markdown(f'<div class="metric-card"><div class="metric-value">{len(predictions)}</div><div class="metric-label">Total Analyzed</div></div>', unsafe_allow_html=True)
-                col2.markdown(f'<div class="metric-card"><div class="metric-value" style="color:#e63946;">{n_fake}</div><div class="metric-label">Scams Found</div></div>', unsafe_allow_html=True)
-                col3.markdown(f'<div class="metric-card"><div class="metric-value" style="color:#06a77d;">{len(predictions)-n_fake}</div><div class="metric-label">Safe Jobs</div></div>', unsafe_allow_html=True)
-                col4.markdown(f'<div class="metric-card"><div class="metric-value">{np.mean([r["probability_fake"] for r in predictions])*100:.1f}%</div><div class="metric-label">Avg Risk</div></div>', unsafe_allow_html=True)
-
-                # CHART
-                verdict_data = pd.DataFrame({
-                    'Status': ['Safe', 'Scam'],
-                    'Count': [len(predictions) - n_fake, n_fake]
-                })
-                fig = px.pie(
-                    verdict_data, values='Count', names='Status',
-                    color_discrete_map={'Scam': '#e63946', 'Safe': '#06a77d'},
-                    title='Distribution'
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-                # DETAILED TABLE
-                st.markdown("### 🔍 Detailed Results")
-                display_cols = ['PREDICTION', 'FRAUD_RISK_%', 'TRUST_SCORE'] + [c for c in ['title', 'description'] if c in results_df.columns]
-                st.dataframe(results_df[display_cols], use_container_width=True)
-
-                # DOWNLOAD
-                csv_buffer = io.StringIO()
-                results_df.to_csv(csv_buffer, index=False)
-                st.download_button(
-                    "⬇️ Download Results CSV",
-                    csv_buffer.getvalue(),
-                    file_name=f"jobguard_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
+        # DOWNLOAD
+        csv_buffer = io.StringIO()
+        results_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            "⬇️ Download Results CSV",
+            csv_buffer.getvalue(),
+            file_name=f"jobguard_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1110,61 +1356,93 @@ with tab3:
     platform = col2.selectbox("📱 Platform", ["Naukri.com", "Internshala"])
     max_jobs = col3.slider("📊 Max Jobs", 5, 25, 10)
 
-if st.button("🔴 START SCAN", type="primary", use_container_width=True):
+    if not cfg.ENABLE_SCRAPING:
+        st.info(
+            "Live scanning is switched off on this deployment because it needs a local Chrome browser. "
+            "Run JobGuard on your machine to use it, or set `JOBGUARD_ENABLE_SCRAPING=true`."
+        )
 
-    with st.spinner(f"Scraping {platform}..."):
+    elif st.button("🔴 START SCAN", type="primary", use_container_width=True):
 
-        try:
+        with st.spinner(f"Scraping {platform}..."):
 
-            if platform == "Naukri.com":
-                from src.scraper.job_scraper import NaukriScraper
-                scraper = NaukriScraper()
+            try:
 
-            else:
-                from src.scraper.internshala_scraper import InternshalaScraper
-                scraper = InternshalaScraper()
+                if platform == "Naukri.com":
+                    from src.scraper.job_scraper import NaukriScraper
+                    scraper = NaukriScraper()
 
-            jobs = scraper.search_jobs(
-                keyword=keyword,
-                max_jobs=max_jobs
-            )
+                else:
+                    from src.scraper.internshala_scraper import InternshalaScraper
+                    scraper = InternshalaScraper()
 
-            st.success(f"✅ Scraped {len(jobs)} jobs")
+                jobs = scraper.search_jobs(
+                    keyword=keyword,
+                    max_jobs=max_jobs
+                )
 
-            live_results = []
+                live_results = []
+                probs = []
 
-            for job in jobs:
-               
+                for job in jobs:
 
-                text = job.combined_text()
-                result = predict(text)
+                    text = job.combined_text()
+                    result = predict(text, explain=False)
+                    probs.append(result['probability_fake'])
 
-                facts = analyze_job(job)
+                    live_results.append({
+                        "Title": job.title[:45],
+                        "Company": job.company[:35],
+                        "Location": job.location,
+                        "Salary": job.salary_range or "—",
+                        "Verdict": "🚨 SCAM" if result['prediction'] == "FAKE" else "✅ SAFE",
+                        "Risk Score": f"{result['probability_fake']*100:.0f}%",
+                        "Trust Score": f"{100 - (result['probability_fake']*100):.0f}%",
+                    })
 
-                prompt = build_prompt(job, facts)
+                st.session_state['scan'] = {
+                    "jobs": jobs, "probs": probs, "platform": platform,
+                    "df": pd.DataFrame(live_results),
+                }
+                st.session_state.pop('scan_ai', None)
 
-                ai_analysis = generate_ai_analysis(prompt)
+            except Exception as e:
+                st.error(
+                    f"Scraping error: {e}\n\n"
+                    "Live scanning needs Selenium and a local Chrome browser, and portals may block automated access."
+                )
 
-                print(ai_analysis)
+    scan = st.session_state.get('scan')
+    if scan and scan["jobs"]:
+        jobs = scan["jobs"]
+        st.success(f"✅ Scraped {len(jobs)} jobs from {scan['platform']}")
+        st.dataframe(scan["df"], width="stretch")
 
-                print(facts)
+        st.markdown("---")
+        st.subheader("🧠 AI Risk Analysis")
+        selected_job = st.selectbox(
+            "Select a job",
+            range(len(jobs)),
+            format_func=lambda i: f"{jobs[i].title} — {jobs[i].company}",
+            key="scan_job_idx"
+        )
+        if st.button("🔍 Generate AI Risk Analysis", key="scan_ai_btn"):
+            with st.spinner("Generating AI analysis..."):
+                j = jobs[selected_job]   # the job picked in the dropdown
+                ai = run_ai_analysis({
+                    "title": j.title, "company": j.company, "location": j.location,
+                    "salary_range": j.salary_range, "description": j.description,
+                    "requirements": j.requirements, "benefits": j.benefits,
+                    "experience": j.experience,
+                }, scan["probs"][selected_job], verify_company=True)
+            st.session_state['scan_ai'] = (selected_job, ai)
 
-                live_results.append({
-                "Title": job.title[:45],
-                "Company": job.company[:35],
-                "Location": job.location,
-                "Salary": job.salary_range or "—",
-                "Verdict": "🚨 SCAM" if result['prediction'] == "FAKE" else "✅ SAFE",
-                "Risk Score": f"{result['probability_fake']*100:.0f}%",
-                "Trust Score": f"{100 - (result['probability_fake']*100):.0f}%"
-                 })
-
-            results_df = pd.DataFrame(live_results)
-
-            st.dataframe(results_df, use_container_width=True)
-
-        except Exception as e:
-            st.error(f"Scraping error: {e}")
+        saved = st.session_state.get('scan_ai')
+        if saved and saved[0] == selected_job and saved[1]:
+            st.markdown("### 🧠 AI Risk Analysis")
+            st.markdown(saved[1]["analysis"])
+            st.caption("Source: Gemini" if saved[1]["source"] in ("gemini", "cache")
+                       else "Source: rule-based summary (Gemini unavailable or not configured)")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -1236,11 +1514,10 @@ with tab5:
 
     with col1:
         st.markdown("#### 🤖 Model Performance")
-        try:
-            import json
-            with open("models/training_results.json") as f:
-                results = json.load(f)
-            for m in results.get("models", []):
+        results = load_training_results(USE_API)
+        if results.get("models"):
+            st.caption(f"Best model on the held-out test set: {results.get('best_model', '—')}")
+            for m in results["models"]:
                 with st.expander(f"📈 {m['model']}"):
                     mc1, mc2 = st.columns(2)
                     mc1.metric("F1-Score", f"{m.get('f1_score', 0):.3f}")
@@ -1248,25 +1525,33 @@ with tab5:
                     mc3, mc4 = st.columns(2)
                     mc3.metric("Precision", f"{m.get('precision', 0):.3f}")
                     mc4.metric("Recall", f"{m.get('recall', 0):.3f}")
-        except FileNotFoundError:
+        else:
             st.info("Train models first to see performance.")
 
     with col2:
-        st.markdown("#### 🔴 Top Scam Keywords")
-        keywords = {
-            "registration fee": 312, "urgent": 287, "investment": 256,
-            "no experience": 234, "guaranteed": 198, "whatsapp": 176
-        }
-        fig = px.bar(
-            x=list(keywords.values()),
-            y=list(keywords.keys()),
-            orientation='h',
-            color=list(keywords.values()),
-            color_continuous_scale='Reds',
-            title="Scam Keywords Frequency"
-        )
-        fig.update_layout(height=350, showlegend=False, template='plotly_white')
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("#### 🔴 Top Scam-Indicating Terms")
+        _terms = top_scam_terms(10)
+        if _terms:
+            fig = px.bar(
+                x=[w for _, w in _terms][::-1],
+                y=[t for t, _ in _terms][::-1],
+                orientation='h',
+                color=[w for _, w in _terms][::-1],
+                color_continuous_scale='Reds',
+                title="Strongest fake-job terms (model coefficients)"
+            )
+            fig.update_layout(height=350, showlegend=False, template='plotly_white',
+                              coloraxis_showscale=False, xaxis_title="Coefficient", yaxis_title="")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Term weights are available when a linear model is loaded locally.")
+
+    st.markdown("#### 🕒 Recent Predictions")
+    _history = read_history(20)
+    if _history:
+        st.dataframe(pd.DataFrame(_history), use_container_width=True, hide_index=True)
+    else:
+        st.info("No predictions logged yet. Analyze a job with the API running to see history here.")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1279,7 +1564,7 @@ st.markdown("""
     <p><b>🛡️ JobGuard Pro v2.0</b> — Enterprise AI Fraud Detection</p>
     <p>Built for RV College of Engineering | CSE 4th Semester</p>
     <p style="font-size:0.8rem;margin-top:0.5rem;">
-        Dataset: EMSCAD (17,880 postings) | Models: XGBoost | Explainability: SHAP
+        Dataset: EMSCAD (17,880 postings) | Model: TF-IDF + Logistic Regression | Explainability: SHAP
     </p>
     <p style="font-size:0.8rem;opacity:0.7;">
         ⚠️ This tool is for educational purposes. Always verify jobs through official channels.

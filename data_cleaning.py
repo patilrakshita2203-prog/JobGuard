@@ -28,11 +28,28 @@ REQUIRED_NLTK_PACKAGES = [
     "averaged_perceptron_tagger"
 ]
 
+# (resource folder, package) - only download what is missing, so importing this
+# module does not hit the network on every start-up / CI run.
+_NLTK_RESOURCE_PATHS = {
+    "stopwords": "corpora/stopwords",
+    "punkt": "tokenizers/punkt",
+    "punkt_tab": "tokenizers/punkt_tab",
+    "wordnet": "corpora/wordnet",
+    "averaged_perceptron_tagger": "taggers/averaged_perceptron_tagger",
+}
+
 for pkg in REQUIRED_NLTK_PACKAGES:
+    _res = _NLTK_RESOURCE_PATHS.get(pkg, pkg)
     try:
-        nltk.download(pkg, quiet=True)
-    except Exception:
-        pass
+        try:
+            nltk.data.find(_res)
+        except LookupError:
+            nltk.data.find(_res + ".zip")  # e.g. wordnet is kept zipped
+    except LookupError:
+        try:
+            nltk.download(pkg, quiet=True)
+        except Exception:
+            pass
 
 
 # Logging

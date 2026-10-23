@@ -1,0 +1,9 @@
+# Only needed to RETRAIN models (model_training.py, hybrid_model_training.py).
+# Not needed to run the API or the dashboard.
+-r requirements.txt
+imbalanced-learn==0.14.1
+xgboost==3.2.0
+torch==2.11.0
+transformers==5.6.1
+sentence-transformers==5.4.1
+seaborn==0.13.2

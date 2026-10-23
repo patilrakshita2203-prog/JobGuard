@@ -12,3 +12,21 @@ data/*.db
 # Ignore large datasets
 *.csv
 .env
+
+# ── Added for deployment ──
+# The deployed app needs the final model + vectorizer (~0.5 MB). Everything else stays ignored.
+!models/best_model.joblib
+!models/tfidf_vectorizer.joblib
+# Small demo CSV used by the README / bulk-upload demo
+!sample_data/
+!sample_data/*.csv
+# Never commit secrets or local databases
+.env
+.streamlit/secrets.toml
+data/*.db
+*.db
+# Python / tooling
+venv/
+.venv/
+.pytest_cache/
+.coverage
