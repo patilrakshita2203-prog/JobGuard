@@ -18,7 +18,7 @@ import io
 
 # Local imports
 from src.preprocessing.data_cleaning import TextCleaner
-from shap_explainer import SHAPExplainer
+from src.explainability.shap_explainer import SHAPExplainer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

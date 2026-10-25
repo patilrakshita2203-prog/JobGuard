@@ -14,7 +14,7 @@ sys.path.append(
 )
 
 from predictor import JobPredictor
-from shap_explainer import SHAPExplainer
+from src.explainability.shap_explainer import SHAPExplainer
 
 # Load prediction model
 predictor = JobPredictor.load(

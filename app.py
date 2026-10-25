@@ -552,7 +552,7 @@ def load_models():
 def load_explainer(model, vectorizer):
     """Load SHAP explainer (cached)."""
     try:
-        from shap_explainer import SHAPExplainer
+        from src.explainability.shap_explainer import SHAPExplainer
         exp = SHAPExplainer(
             model=model,
             vectorizer=vectorizer,
