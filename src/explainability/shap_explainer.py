@@ -25,12 +25,14 @@ class SHAPExplainer:
         print("Building SHAP Explainer...")
 
         if X_background is None:
-            X_background = self.vectorizer.transform([
-                "software engineer python backend developer remote job",
-                "urgent hiring work from home registration fee required",
-                "data analyst sql power bi fresher opportunity",
-                "earn money fast no experience whatsapp immediately"
-            ])
+            # Neutral baseline = an EMPTY posting (all-zero TF-IDF row), so every
+            # contribution comes from a word that is actually IN the posting.
+            # (The old baseline was 4 hand-written sentences: words absent from
+            # the posting but present in those sentences got blamed/credited.)
+            from scipy.sparse import csr_matrix
+
+            n_features = len(self.vectorizer.get_feature_names_out())
+            X_background = csr_matrix((1, n_features))
 
         self._explainer = shap.Explainer(
             self.model,
@@ -144,11 +146,7 @@ class SHAPExplainer:
         shap.summary_plot(
             shap_values.values,
             X_sample,
-            feature_names=(
-                self.feature_names[:20]
-                if self.feature_names
-                else None
-            ),
+            feature_names=self.feature_names,
             max_display=20,
             show=False
         )
