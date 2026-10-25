@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 import xgboost as xgb
+from scipy.sparse import csr_matrix
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -106,6 +107,13 @@ def train_xgboost(X_train, y_train):
     """Train XGBoost final model."""
     logger.info("Training XGBoost...")
 
+    # SMOTE returns a DENSE array, but the test set and the API feed SPARSE TF-IDF
+    # matrices. XGBoost treats zeros in sparse input as "missing" and zeros in dense
+    # input as real values, so a model trained dense and scored sparse sends every
+    # posting down the same path (that is what produced F1 0.09 / AUC 0.46 before).
+    # Train on sparse so training, evaluation and serving all see the same thing.
+    X_train = csr_matrix(X_train)
+
     neg_count = (y_train == 0).sum()
     pos_count = (y_train == 1).sum()
     scale_pos_weight = neg_count / pos_count
@@ -152,19 +160,20 @@ def main():
     preprocessor = DataPreprocessor()
     df, X_text, y = preprocessor.load_and_preprocess(DATA_PATH)
 
-    logger.info("\n[2/5] Extracting TF-IDF features...")
-    tfidf = TFIDFExtractor(max_features=10000, ngram_range=(1, 2))
-    X_tfidf = tfidf.fit_transform(X_text)
-    tfidf.save("models/tfidf_vectorizer.joblib")
-
-    logger.info("\n[3/5] Splitting train and test data...")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_tfidf,
+    logger.info("\n[2/5] Splitting train and test data...")
+    X_text_train, X_text_test, y_train, y_test = train_test_split(
+        X_text,
         y,
         test_size=0.2,
         random_state=RANDOM_STATE,
         stratify=y,
     )
+
+    logger.info("\n[3/5] Extracting TF-IDF features (fitted on the training split only)...")
+    tfidf = TFIDFExtractor(max_features=10000, ngram_range=(1, 2))
+    X_train = tfidf.fit_transform(X_text_train)
+    X_test = tfidf.transform(X_text_test)
+    tfidf.save("models/tfidf_vectorizer.joblib")
 
     logger.info("\n[4/5] Applying SMOTE...")
     balancer = SMOTEBalancer(sampling_strategy=0.3, k_neighbors=5)
