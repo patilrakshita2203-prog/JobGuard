@@ -1,5 +1,6 @@
 # Job scraper for live job postings
 
+import os
 import time
 import logging
 import random
@@ -11,6 +12,12 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+
+try:
+    from src.scraper.naukri_parsing import extract_salary, extract_experience, NOT_DISCLOSED
+except ImportError:  # running this file directly: python src/scraper/job_scraper.py
+    from naukri_parsing import extract_salary, extract_experience, NOT_DISCLOSED
+
 logger = logging.getLogger(__name__)
 
 # Rotate user agents to avoid blocking
@@ -19,6 +26,9 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/119.0 Safari/537.36",
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/118.0 Safari/537.36"
 ]
+
+# Set JOBGUARD_SCRAPER_DEBUG=true to print what was extracted and save the first card's HTML
+DEBUG_SCRAPER = os.getenv("JOBGUARD_SCRAPER_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Delay between requests
 MIN_DELAY = 2
@@ -126,21 +136,32 @@ class NaukriScraper(BaseScraper):
                 except:
                     pass
 
-                try:
-                    salary = card.find_element(
-                        By.XPATH,
-                     ".//*[contains(text(),'₹') or contains(text(),'LPA') or contains(text(),'Lakhs')]"
-                ).text
-                except:
-                 salary = "Not Disclosed"
-
                 full_text = card.text.strip()
+
+                # Salary + experience: Naukri shows "3-6 Lacs PA" (the old check only
+                # looked for the rupee sign / "LPA" / "Lakhs", so it never matched)
+                try:
+                    card_html = card.get_attribute("outerHTML") or ""
+                except Exception:
+                    card_html = ""
+                salary = extract_salary(card_html, full_text) or NOT_DISCLOSED
+                experience = extract_experience(card_html, full_text)
+
+                if DEBUG_SCRAPER and not jobs:  # dump the first card so selectors can be fixed fast
+                    try:
+                        with open("debug_naukri_card.html", "w", encoding="utf-8") as f:
+                            f.write(card_html)
+                    except OSError:
+                        pass
+                if DEBUG_SCRAPER:
+                    print(f"[debug] {title[:40]!r} salary={salary!r} experience={experience!r}")
 
                 job = JobPosting(
                     title=title,
                     company=company,
                     location=location,
                     salary_range=salary,
+                    experience=experience,
                     description=full_text,
                     source_platform="Naukri"
                 )
