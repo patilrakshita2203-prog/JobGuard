@@ -939,7 +939,7 @@ with tab1:
             st.markdown("---")
             if st.button("📄 Generate PDF Report", use_container_width=False):
                 try:
-                    from pdf_reporter import generate_pdf_report
+                    from src.reporting.pdf_reporter import generate_pdf_report
                     job_data = {
                         "title": job_title, "company": company,
                         "salary_range": salary, "location": location,
