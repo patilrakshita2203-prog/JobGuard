@@ -1,3 +1,16 @@
+def _website_state(value):
+    if value is None:
+        return "Could not be checked (do not assume either way)"
+    return value
+
+
+def _red_flag_lines(facts):
+    flags = facts.get("red_flags") or []
+    if not flags:
+        return "None detected"
+    return "; ".join(f"{f['label']} (\"{f['evidence']}\")" for f in flags)
+
+
 def build_prompt(job, facts):
 
     prompt = f"""
@@ -21,13 +34,15 @@ Salary Disclosed: {facts['salary_disclosed']}
 
 Company Available: {facts['company_available']}
 
-Official Website Found: {facts['official_website_found']}
+Official Website Found: {_website_state(facts['official_website_found'])}
 
 Location Available: {facts['location_available']}
 
 Experience Mentioned: {facts['experience_available']}
 
 Description Length: {facts['description_length']} characters
+
+Scam Red Flags Found In Text: {_red_flag_lines(facts)}
 
 Instructions:
 
