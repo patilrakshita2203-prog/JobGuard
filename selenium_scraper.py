@@ -13,7 +13,7 @@ sys.path.append(
     )
 )
 
-from predictor import JobPredictor
+from src.ml.predictor import JobPredictor
 from src.explainability.shap_explainer import SHAPExplainer
 
 # Load prediction model

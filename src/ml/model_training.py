@@ -21,8 +21,8 @@ from sklearn.metrics import (
 )
 
 from src.preprocessing.data_cleaning import DataPreprocessor
-from smote_balancer import SMOTEBalancer
-from vectorizer import TFIDFExtractor
+from src.ml.smote_balancer import SMOTEBalancer
+from src.ml.vectorizer import TFIDFExtractor
 
 logging.basicConfig(
     level=logging.INFO,
