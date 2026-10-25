@@ -20,7 +20,7 @@ from sklearn.metrics import (
     average_precision_score,
 )
 
-from data_cleaning import DataPreprocessor
+from src.preprocessing.data_cleaning import DataPreprocessor
 from smote_balancer import SMOTEBalancer
 from vectorizer import TFIDFExtractor
 

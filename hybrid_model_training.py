@@ -19,7 +19,7 @@ from sklearn.metrics import (
 from scipy.sparse import hstack, csr_matrix
 from sentence_transformers import SentenceTransformer
 
-from data_cleaning import DataPreprocessor
+from src.preprocessing.data_cleaning import DataPreprocessor
 from vectorizer import TFIDFExtractor
 
 logging.basicConfig(

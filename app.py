@@ -28,7 +28,7 @@ import time
 # Local imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.explainability.knowledge_graph_realtime import RealTimeSkillKnowledgeGraph
-from data_cleaning import TextCleaner
+from src.preprocessing.data_cleaning import TextCleaner
 from src.explainability.rule_engine import analyze_job
 from src.explainability.prompt_builder import build_prompt
 from src.explainability.llm_analyzer import generate_ai_analysis

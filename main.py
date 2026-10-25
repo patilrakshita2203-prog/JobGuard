@@ -17,7 +17,7 @@ import pandas as pd
 import io
 
 # Local imports
-from data_cleaning import TextCleaner
+from src.preprocessing.data_cleaning import TextCleaner
 from shap_explainer import SHAPExplainer
 
 logging.basicConfig(level=logging.INFO)
