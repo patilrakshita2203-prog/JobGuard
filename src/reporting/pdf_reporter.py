@@ -10,6 +10,14 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from pathlib import Path
 from datetime import datetime
+from xml.sax.saxutils import escape
+
+
+def _pdf_text(value, default="N/A"):
+    """Make text safe for ReportLab: Helvetica has no rupee glyph, and Paragraph
+    reads '<', '&' as markup (a description like 'R&D <team' used to crash the PDF)."""
+    text = str(value if value not in (None, "") else default)
+    return text.replace("₹", "Rs. ")
 
 
 def generate_pdf_report(job_data, result):
@@ -47,10 +55,10 @@ def generate_pdf_report(job_data, result):
     elements.append(Spacer(1, 10))
 
     job_table_data = [
-        ["Job Title", job_data.get("title", "N/A")],
-        ["Company", job_data.get("company", "N/A")],
-        ["Location", job_data.get("location", "N/A")],
-        ["Salary", job_data.get("salary_range", "N/A")],
+        ["Job Title", _pdf_text(job_data.get("title"))],
+        ["Company", _pdf_text(job_data.get("company"))],
+        ["Location", _pdf_text(job_data.get("location"))],
+        ["Salary", _pdf_text(job_data.get("salary_range"))],
     ]
 
     job_table = Table(job_table_data, colWidths=[150, 320])
@@ -101,10 +109,10 @@ def generate_pdf_report(job_data, result):
     elements.append(heading3)
     elements.append(Spacer(1, 10))
 
-    desc = job_data.get("description", "No description provided")
+    desc = _pdf_text(job_data.get("description"), "No description provided")[:1500]
 
     description = Paragraph(
-        desc[:1500],
+        escape(desc).replace("\n", "<br/>"),
         styles["BodyText"]
     )
 
