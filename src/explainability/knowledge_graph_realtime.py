@@ -2,14 +2,15 @@
 src/explainability/knowledge_graph_realtime_v2.py
 JobGuard — Real-Time Knowledge Graph with Skill Validation
 
-This knowledge graph ONLY uses real job postings from Naukri/Internshala.
-It extracts:
-- Actual required skills per role (from real jobs)
-- Real salary ranges (from real jobs)
-- Real red flags (from real jobs)
-- Job title vs required skills matching
+A small, hand-curated reference map of typical skills and salaries per role
+(17 example postings across 7 roles, written into this file). It is NOT scraped
+live: treat it as a lightweight sanity check on "does the skill list fit the
+job title", not as market data.
 
-NO DUMMY DATA - Everything is extracted from live job postings.
+It checks:
+- Typical required skills per role
+- Typical salary range per role
+- Job title vs mentioned skills matching
 """
 
 import logging
@@ -43,9 +44,9 @@ class RealTimeSkillKnowledgeGraph:
         Build knowledge graph from REAL job postings.
         Scrapes actual jobs and extracts skills.
         """
-        logger.info("Building knowledge graph from REAL job postings...")
+        logger.info("Building knowledge graph from the built-in reference postings...")
         
-        # Real job examples from Naukri/Internshala (these would be scraped in production)
+        # Hand-written reference examples (not scraped); extend or replace with scraped data later
         real_jobs = {
             "data entry": [
                 {
@@ -169,7 +170,7 @@ class RealTimeSkillKnowledgeGraph:
                 "total_jobs": len(jobs)
             }
 
-        logger.info(f"✅ Knowledge graph built from {sum(len(jobs) for jobs in real_jobs.values())} real jobs")
+        logger.info(f"✅ Knowledge graph built from {sum(len(jobs) for jobs in real_jobs.values())} reference jobs")
 
     def detect_role(self, job_title: str) -> Optional[str]:
         """Detect job role from title."""
@@ -180,6 +181,11 @@ class RealTimeSkillKnowledgeGraph:
                 return role
         
         return None
+
+    @staticmethod
+    def _mentions(skill: str, text_lower: str) -> bool:
+        """Whole-word match, so 'hr' is not found inside 'three' or 'git' inside 'digital'."""
+        return re.search(rf"(?<![a-z0-9]){re.escape(skill)}(?![a-z0-9])", text_lower) is not None
 
     def get_expected_skills(self, role: str) -> Set[str]:
         """Get expected skills for a role (from real jobs)."""
@@ -202,7 +208,8 @@ class RealTimeSkillKnowledgeGraph:
                 "expected_skills": [],
                 "found_skills": [],
                 "mismatched_skills": [],
-                "skill_mismatch_score": 0.5,
+                "skill_coverage": 0.0,
+                "mismatch_score": 0.5,
                 "is_suspicious": False
             }
 
@@ -210,7 +217,7 @@ class RealTimeSkillKnowledgeGraph:
         job_text_lower = job_text.lower()
 
         # Find which expected skills are mentioned
-        found_skills = [skill for skill in expected_skills if skill in job_text_lower]
+        found_skills = [skill for skill in expected_skills if self._mentions(skill, job_text_lower)]
 
         # Find skills that ARE mentioned but shouldn't be for this role
         # This detects fake jobs that demand wrong skills
@@ -219,7 +226,7 @@ class RealTimeSkillKnowledgeGraph:
             all_skills.update(role_skills_data["skills"])
 
         # Skills mentioned but NOT expected for this role
-        mentioned_skills = [skill for skill in all_skills if skill in job_text_lower]
+        mentioned_skills = [skill for skill in all_skills if self._mentions(skill, job_text_lower)]
         mismatched_skills = [skill for skill in mentioned_skills if skill not in expected_skills]
 
         # Calculate mismatch score
@@ -298,7 +305,7 @@ class RealTimeSkillKnowledgeGraph:
             "skill_analysis": skill_validation,
             "salary_analysis": salary_validation,
             "fraud_risk": round(fraud_risk, 3),
-            "is_suspicious": skill_validation["is_suspicious"] or (salary_validation and salary_validation.get("anomaly", False)),
+            "is_suspicious": bool(skill_validation["is_suspicious"] or (salary_validation and salary_validation.get("anomaly", False))),
             "red_flags": []
         }
 
