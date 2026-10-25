@@ -91,7 +91,8 @@ def main():
     logger.info("[2/6] TF-IDF feature extraction...")
     tfidf = TFIDFExtractor(max_features=10000, ngram_range=(1, 2))
     X_tfidf = tfidf.fit_transform(X_text)
-    tfidf.save("models/tfidf_vectorizer.joblib")
+    # own file: model_training.py's vectorizer belongs to best_model.joblib and must not be replaced
+    tfidf.save("models/tfidf_vectorizer_hybrid.joblib")
 
     logger.info("[3/6] BERT embeddings generation...")
     X_bert = get_bert_embeddings(df["raw_text"])
