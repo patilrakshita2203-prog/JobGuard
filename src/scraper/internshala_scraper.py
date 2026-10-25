@@ -15,6 +15,9 @@ class JobPosting:
     location: str = ""
     salary_range: str = ""
     description: str = ""
+    requirements: str = ""
+    benefits: str = ""
+    experience: str = ""
     source_platform: str = ""
 
     def to_dict(self):
@@ -225,8 +228,11 @@ class InternshalaScraper:
                                 salary = line.strip()
                                 break
 
-                    # DESCRIPTION
-                    description = f"{title} at {company}" if title != "N/A" else "Job posting"
+                    # DESCRIPTION: use the whole card text so the model has something to read
+                    # (it used to get only "<title> at <company>")
+                    description = card_text.strip() or (
+                        f"{title} at {company}" if title != "N/A" else "Job posting"
+                    )
 
                     # Create job object
                     job = JobPosting(
