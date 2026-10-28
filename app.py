@@ -82,9 +82,12 @@ st.markdown("""
     --border-color: #334155;
 }
     
-    html, body, [class*="css"], [class*="st"] {
+    html, body, [class*="css"], [class*="st"]:not([data-testid="stIconMaterial"]):not([class*="material"]) {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     }
+
+    /* the top toolbar was a white strip on the dark page */
+    header[data-testid="stHeader"] { background: transparent; }
     
    .main {
     background: linear-gradient(135deg, #020617 0%, #0f172a 100%);

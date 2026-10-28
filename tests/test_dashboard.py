@@ -68,3 +68,10 @@ def test_internshala_scan_and_ai_analysis_do_not_crash(monkeypatch):
     _click(at, "Generate AI Risk Analysis")
     assert not at.exception
     assert at.session_state["scan_ai"][0] == 1
+
+
+def test_icon_font_is_not_overridden_and_the_toolbar_is_transparent():
+    """Regression: a broad font rule turned icon names into text (keyboard_double_arrow_left)."""
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert '[class*="st"]:not([data-testid="stIconMaterial"])' in source
+    assert 'header[data-testid="stHeader"] { background: transparent; }' in source
