@@ -10,6 +10,8 @@ sys.path.insert(0, str(ROOT))
 
 # Must be set BEFORE src.config is imported anywhere
 os.environ["JOBGUARD_MODE"] = "local"
+os.environ["JOBGUARD_AUTH_REQUIRED"] = "false"  # the login page has its own tests
+os.environ["JOBGUARD_AUTH_DB_PATH"] = str(Path(tempfile.mkdtemp()) / "users.db")
 os.environ["JOBGUARD_DB_PATH"] = str(Path(tempfile.mkdtemp()) / "predictions.db")
 os.environ["JOBGUARD_RATE_LIMIT"] = "1000"
 os.environ["JOBGUARD_BATCH_RATE_LIMIT"] = "1000"

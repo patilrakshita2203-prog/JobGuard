@@ -36,6 +36,7 @@ from src.explainability.llm_analyzer import generate_ai_analysis, analyze_job_ri
 from src.explainability.red_flags import detect_red_flags
 from src.explainability.job_posting import JobPostingLite
 from src import config as cfg
+from src.auth.login_page import require_login, sign_out
 from src.api_client import JobGuardClient, ApiError
 # ═══════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -521,6 +522,8 @@ st.markdown("""
     background: rgba(59, 130, 246, 0.22); border-color: rgba(96, 165, 250, 0.55);
 }
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p { font-weight: 600; }
+.account-box { padding: 0.7rem 0.2rem 0.2rem; font-size: 0.9rem; }
+.account-box small { opacity: 0.7; display: block; word-break: break-all; }
 
 div[data-baseweb="input"] input {
     color: #f8fafc !important;
@@ -553,6 +556,13 @@ details summary::marker {
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════
+# LOGIN (shows the login page and stops here until someone is signed in)
+# ═══════════════════════════════════════════════════════════════
+
+current_user = require_login()
+
 
 # ═══════════════════════════════════════════════════════════════
 # LOAD MODELS
@@ -937,6 +947,16 @@ with st.sidebar:
             st.caption("⚠️ The backend dropped mid-session; using the local model.")
         if st.button("🔄 Re-check", key="recheck_backend"):
             backend_status.clear()
+            st.rerun()
+
+    st.markdown("---")
+    if current_user.get("name") and current_user.get("provider") != "none":
+        st.markdown(
+            f'<div class="account-box">👤 <b>{current_user["name"]}</b><small>{current_user.get("email", "")}</small></div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign out", key="sign_out", use_container_width=True):
+            sign_out()
             st.rerun()
 
 

@@ -89,6 +89,13 @@ MODE = str(get_setting("JOBGUARD_MODE", "auto")).strip().lower()
 ENABLE_SCRAPING = get_bool("JOBGUARD_ENABLE_SCRAPING", True)
 DEMO_MODE = get_bool("JOBGUARD_DEMO_MODE", False)  # random output - never enable in production
 
+# ── Login ──
+# JOBGUARD_AUTH_REQUIRED=false turns the login page off (handy for local development).
+AUTH_REQUIRED = get_bool("JOBGUARD_AUTH_REQUIRED", True)
+AUTH_DB_PATH = Path(get_setting("JOBGUARD_AUTH_DB_PATH", str(BASE_DIR / "data" / "users.db")))
+SESSION_DAYS = get_int("JOBGUARD_SESSION_DAYS", 30)
+ALLOW_SIGNUP = get_bool("JOBGUARD_ALLOW_SIGNUP", True)
+
 # ── LLM ──
 GEMINI_MODEL = str(get_setting("JOBGUARD_GEMINI_MODEL", "gemini-2.5-flash"))
 LLM_TIMEOUT_SEC = get_int("JOBGUARD_LLM_TIMEOUT", 30)

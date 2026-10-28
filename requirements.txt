@@ -23,6 +23,9 @@ nltk==3.9.3
 shap==0.51.0
 matplotlib==3.10.8
 
+# Login (Google sign-in uses Streamlit's built-in OpenID Connect, which needs Authlib)
+Authlib==1.9.1
+
 # Dashboard
 plotly==6.6.0
 beautifulsoup4==4.14.3
