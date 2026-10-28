@@ -970,9 +970,6 @@ st.markdown("""
 <div class="header-banner animate-header">
     <h1>🛡️ JobGuard Pro</h1>
     <p>Enterprise AI-Powered Fake Job Detection</p>
-    <p style="font-size:0.95rem;opacity:0.8;margin-top:1rem;">
-        NLP • TF-IDF + Logistic Regression • SHAP Explainability • FastAPI • PDF Reports
-    </p>
     <div class="header-badge">v2.0 — Production Ready</div>
 </div>
 """, unsafe_allow_html=True)

@@ -75,3 +75,9 @@ def test_icon_font_is_not_overridden_and_the_toolbar_is_transparent():
     source = (ROOT / "app.py").read_text(encoding="utf-8")
     assert '[class*="st"]:not([data-testid="stIconMaterial"])' in source
     assert 'header[data-testid="stHeader"] { background: transparent; }' in source
+
+
+def test_keywords_line_is_gone_from_the_header(app):
+    text = " ".join(m.value for m in app.markdown)
+    assert "SHAP Explainability" not in text
+    assert "JobGuard Pro" in text
