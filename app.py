@@ -509,6 +509,19 @@ st.markdown("""
     color: #f8fafc !important;
 }
 
+/* left menu: one item per line, like a normal website */
+[data-testid="stSidebar"] [role="radiogroup"] { gap: 0.3rem; }
+[data-testid="stSidebar"] [role="radiogroup"] label {
+    width: 100%; margin: 0; padding: 0.7rem 0.95rem; border-radius: 10px;
+    border: 1px solid transparent; cursor: pointer; transition: background 0.15s;
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:hover { background: rgba(255, 255, 255, 0.08); }
+[data-testid="stSidebar"] [role="radiogroup"] label > div:first-child { display: none; }
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) {
+    background: rgba(59, 130, 246, 0.22); border-color: rgba(96, 165, 250, 0.55);
+}
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p { font-weight: 600; }
+
 div[data-baseweb="input"] input {
     color: #f8fafc !important;
 }
@@ -890,76 +903,41 @@ def shap_bar_chart(result: dict):
 
 
 # ═══════════════════════════════════════════════════════════════
-# SIDEBAR
+# SIDEBAR: menu, backend status, account
 # ═══════════════════════════════════════════════════════════════
 
-with st.sidebar:
-    st.markdown('<div class="sidebar-header">🛡️ JobGuard Pro</div>', unsafe_allow_html=True)
+PAGE_LABELS = ["🔍  Single Analyzer", "📁  Bulk Analysis", "🌐  Live Scanner", "💰  Salary Checker", "📊  Analytics"]
 
+with st.sidebar:
+    st.markdown("## 🛡️ JobGuard Pro")
+    page = st.radio("Menu", PAGE_LABELS, key="nav_page", label_visibility="collapsed")
+
+    st.markdown("---")
+    # one status line; the details sit in a small collapsed section
     if USE_API:
-        st.success("✅ FastAPI backend connected")
-        st.caption(
-            f"{cfg.API_URL} · v{BACKEND.get('version', '?')} · "
-            f"SHAP {'on' if BACKEND.get('explainer_loaded') else 'off'} · "
-            f"Gemini {'on' if BACKEND.get('llm_configured') else 'off (rule-based fallback)'}"
-        )
+        st.success("✅ Backend connected")
     elif models_loaded:
-        st.warning("🟡 Local mode — backend not reachable")
-        st.caption(f"{BACKEND.get('reason', '')}. Start it with `uvicorn main:app --reload`.")
+        st.warning("🟡 Local mode")
     else:
         st.error("⚠️ Models not loaded")
-        st.info("Add `models/best_model.joblib` and `models/tfidf_vectorizer.joblib`, "
-                "or train them with `python -m src.ml.model_training`.")
-    if st.session_state.get("api_fallback"):
-        st.caption("⚠️ The backend dropped mid-session; using the local model.")
-    if st.button("🔄 Re-check backend", key="recheck_backend"):
-        backend_status.clear()
-        st.rerun()
 
-    st.markdown("---")
-    st.markdown("### 📊 System Status")
-
-    _best_f1_raw = load_training_results(USE_API).get("best_f1")
-    _best_f1 = f"{_best_f1_raw:.2f}" if isinstance(_best_f1_raw, (int, float)) else "—"
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown(f'''
-        <div class="sidebar-metric">
-            <div class="sidebar-metric-value">{_best_f1}</div>
-            <div class="sidebar-metric-label">Test F1-Score</div>
-        </div>
-        ''', unsafe_allow_html=True)
-    with col2:
-        st.markdown('''
-        <div class="sidebar-metric">
-            <div class="sidebar-metric-value">17.8K</div>
-            <div class="sidebar-metric-label">Dataset Size</div>
-        </div>
-        ''', unsafe_allow_html=True)
-
-    col3, col4 = st.columns(2)
-    with col3:
-        st.markdown('''
-        <div class="sidebar-metric">
-            <div class="sidebar-metric-value">866</div>
-            <div class="sidebar-metric-label">Fake Jobs</div>
-        </div>
-        ''', unsafe_allow_html=True)
-    with col4:
-        st.markdown('''
-        <div class="sidebar-metric">
-            <div class="sidebar-metric-value">4.84%</div>
-            <div class="sidebar-metric-label">Imbalance</div>
-        </div>
-        ''', unsafe_allow_html=True)
-
-    st.markdown("---")
-    st.markdown("### 🔗 Quick Links")
-    st.markdown("[📘 GitHub Repo](https://github.com/patilrakshita2203-prog/JobGuard)")
-    st.markdown("[🔴 Report Cybercrime](https://cybercrime.gov.in)")
-    st.markdown("[📞 NASSCOM Helpline](https://nasscom.in)")
-    st.markdown("[📊 Kaggle Dataset](https://www.kaggle.com/datasets/shivamb/real-or-fake-fake-jobposting-prediction)")
+    with st.expander("Backend details"):
+        if USE_API:
+            st.caption(
+                f"{cfg.API_URL} · v{BACKEND.get('version', '?')} · "
+                f"SHAP {'on' if BACKEND.get('explainer_loaded') else 'off'} · "
+                f"Gemini {'on' if BACKEND.get('llm_configured') else 'off (rule-based fallback)'}"
+            )
+        elif models_loaded:
+            st.caption(f"{BACKEND.get('reason', '')}. Start the backend with `uvicorn main:app --reload`.")
+        else:
+            st.caption("Add `models/best_model.joblib` and `models/tfidf_vectorizer.joblib`, "
+                       "or train them with `python -m src.ml.model_training`.")
+        if st.session_state.get("api_fallback"):
+            st.caption("⚠️ The backend dropped mid-session; using the local model.")
+        if st.button("🔄 Re-check", key="recheck_backend"):
+            backend_status.clear()
+            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -997,20 +975,11 @@ if not USE_API and not models_loaded and not cfg.DEMO_MODE:
 # TABS
 # ═══════════════════════════════════════════════════════════════
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🔍 Single Analyzer",
-    "📁 Bulk Analysis",
-    "🌐 Live Scanner",
-    "💰 Salary Checker",
-    "📊 Analytics"
-])
-
-
 # ════════════════════════════════════════════════════════════════
 # TAB 1: SINGLE JOB ANALYZER
 # ════════════════════════════════════════════════════════════════
 
-with tab1:
+def page_single():
     st.markdown("### 🔍 Analyze a Job Posting")
     st.markdown("Paste job details below and get an instant AI-powered fraud assessment with SHAP explanation.")
 
@@ -1258,7 +1227,7 @@ with tab1:
 # TAB 2: BULK ANALYZER
 # ════════════════════════════════════════════════════════════════
 
-with tab2:
+def page_bulk():
     st.markdown("### 📁 Bulk Job Analysis")
     st.markdown("Upload a CSV file to analyze multiple job postings at once.")
 
@@ -1357,7 +1326,7 @@ with tab2:
 # TAB 3: LIVE SCANNER
 # ════════════════════════════════════════════════════════════════
 
-with tab3:
+def page_live():
     st.markdown("### 🌐 Live Portal Scanner")
     st.markdown("Scrape and analyze live job postings from Naukri.com in real-time.")
 
@@ -1458,7 +1427,7 @@ with tab3:
 # TAB 4: SALARY CHECKER
 # ════════════════════════════════════════════════════════════════
 
-with tab4:
+def page_salary():
     st.markdown("### 💰 Salary Anomaly Detector")
     st.markdown("Check if salary is realistic for the job role and experience level.")
 
@@ -1516,7 +1485,7 @@ with tab4:
 # TAB 5: ANALYTICS
 # ════════════════════════════════════════════════════════════════
 
-with tab5:
+def page_analytics():
     st.markdown("### 📊 System Analytics")
 
     col1, col2 = st.columns(2)
@@ -1561,6 +1530,26 @@ with tab5:
         st.dataframe(pd.DataFrame(_history), use_container_width=True, hide_index=True)
     else:
         st.info("No predictions logged yet. Analyze a job with the API running to see history here.")
+
+    st.markdown("---")
+    st.markdown("### 🔗 Resources")
+    st.markdown("[📘 GitHub Repo](https://github.com/patilrakshita2203-prog/JobGuard)  \n"
+                "[🔴 Report Cybercrime](https://cybercrime.gov.in)  \n"
+                "[📞 NASSCOM Helpline](https://nasscom.in)  \n"
+                "[📊 Kaggle Dataset](https://www.kaggle.com/datasets/shivamb/real-or-fake-fake-jobposting-prediction)")
+
+
+# ═══════════════════════════════════════════════════════════════
+# SHOW THE SELECTED PAGE
+# ═══════════════════════════════════════════════════════════════
+
+{
+    PAGE_LABELS[0]: page_single,
+    PAGE_LABELS[1]: page_bulk,
+    PAGE_LABELS[2]: page_live,
+    PAGE_LABELS[3]: page_salary,
+    PAGE_LABELS[4]: page_analytics,
+}[page]()
 
 
 # ═══════════════════════════════════════════════════════════════

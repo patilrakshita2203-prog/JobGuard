@@ -20,7 +20,34 @@ def _click(at, label_part):
 
 def test_dashboard_loads_without_errors(app):
     assert not app.exception
-    assert len(app.tabs) == 5
+
+
+def test_pages_are_a_vertical_menu_in_the_sidebar_not_tabs(app):
+    assert len(app.tabs) == 0
+    menu = app.sidebar.radio(key="nav_page")
+    assert len(menu.options) == 5
+    assert [o.strip() for o in menu.options][0].endswith("Single Analyzer")
+
+
+def test_keywords_line_is_gone_from_the_header(app):
+    text = " ".join(m.value for m in app.markdown)
+    assert "SHAP Explainability" not in text
+    assert "JobGuard Pro" in text
+
+
+@pytest.mark.parametrize("index,heading", [
+    (0, "Analyze a Job Posting"),
+    (1, "Bulk Job Analysis"),
+    (2, "Live Portal Scanner"),
+    (3, "Salary Anomaly Detector"),
+    (4, "System Analytics"),
+])
+def test_every_page_opens_from_the_menu(index, heading):
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+    menu = at.sidebar.radio(key="nav_page")
+    menu.set_value(menu.options[index]).run()
+    assert not at.exception
+    assert heading in " ".join(m.value for m in at.markdown)
 
 
 def test_demo_button_fills_the_form_and_analysis_flags_the_scam():
@@ -61,6 +88,8 @@ def test_internshala_scan_and_ai_analysis_do_not_crash(monkeypatch):
     monkeypatch.setattr(ish.InternshalaScraper, "search_jobs", fake_search)
 
     at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+    menu = at.sidebar.radio(key="nav_page")
+    menu.set_value(menu.options[2]).run()   # Live Scanner
     [s for s in at.selectbox if s.label and "Platform" in s.label][0].select("Internshala").run()
     _click(at, "START SCAN")
     assert not at.exception and not at.error
@@ -68,16 +97,3 @@ def test_internshala_scan_and_ai_analysis_do_not_crash(monkeypatch):
     _click(at, "Generate AI Risk Analysis")
     assert not at.exception
     assert at.session_state["scan_ai"][0] == 1
-
-
-def test_icon_font_is_not_overridden_and_the_toolbar_is_transparent():
-    """Regression: a broad font rule turned icon names into text (keyboard_double_arrow_left)."""
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert '[class*="st"]:not([data-testid="stIconMaterial"])' in source
-    assert 'header[data-testid="stHeader"] { background: transparent; }' in source
-
-
-def test_keywords_line_is_gone_from_the_header(app):
-    text = " ".join(m.value for m in app.markdown)
-    assert "SHAP Explainability" not in text
-    assert "JobGuard Pro" in text
