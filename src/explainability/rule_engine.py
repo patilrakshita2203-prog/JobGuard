@@ -21,6 +21,7 @@ def analyze_job(job, verify_company: bool = True):
 
     # Company
     facts["company_available"] = _s(job.company) != ""
+    facts["website_check_requested"] = bool(verify_company)
     facts["official_website_found"] = (
         company_has_website(job.company) if verify_company else None
     )

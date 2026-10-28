@@ -49,6 +49,16 @@ def test_unknown_website_is_not_reported_as_missing(monkeypatch):
     assert "could not be checked" in build_fallback_analysis(job, facts)
 
 
+def test_not_looking_up_the_website_is_said_plainly(monkeypatch):
+    """When the check was not requested the summary must not claim that search failed."""
+    job = make_job()
+    facts = rule_engine.analyze_job(job, verify_company=False)
+    assert facts["website_check_requested"] is False
+    assert "not looked up" in build_fallback_analysis(job, facts)
+    assert "search unavailable" not in build_fallback_analysis(job, facts)
+    assert "Not looked up" in build_prompt(job, facts)
+
+
 def test_red_flags_are_part_of_the_facts(monkeypatch):
     monkeypatch.setattr(rule_engine, "company_has_website", lambda name: None)
     facts = rule_engine.analyze_job(make_job(description="Registration fee Rs 500, WhatsApp to join"))

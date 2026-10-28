@@ -16,14 +16,16 @@ def build_fallback_analysis(
     red_flags = red_flags or []
     bullets = []
 
-    bullets.append(
-        _yn(
+    if facts.get("website_check_requested") is False:
+        website_line = "The company website was not looked up, so the employer is unverified."
+    else:
+        website_line = _yn(
             facts.get("official_website_found"),
             "An official-looking website matching the company name was found online.",
             "No website matching the company name was found online, so the employer could not be verified.",
             "The company website could not be checked right now (search unavailable), so the employer is unverified.",
         )
-    )
+    bullets.append(website_line)
 
     transparency = []
     transparency.append("salary is disclosed" if facts.get("salary_disclosed") else "salary is not disclosed")

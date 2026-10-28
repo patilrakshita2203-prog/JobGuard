@@ -1,4 +1,6 @@
-def _website_state(value):
+def _website_state(value, requested=True):
+    if value is None and requested is False:
+        return "Not looked up (do not assume either way)"
     if value is None:
         return "Could not be checked (do not assume either way)"
     return value
@@ -34,7 +36,7 @@ Salary Disclosed: {facts['salary_disclosed']}
 
 Company Available: {facts['company_available']}
 
-Official Website Found: {_website_state(facts['official_website_found'])}
+Official Website Found: {_website_state(facts['official_website_found'], facts.get('website_check_requested', True))}
 
 Location Available: {facts['location_available']}
 
