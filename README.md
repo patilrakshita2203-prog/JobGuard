@@ -27,6 +27,7 @@ Fake job postings target freshers with registration fees, "guaranteed" placement
 
 | Feature | Description |
 |---|---|
+| 🔐 Login | Sign in with Google or with an email and password (accounts, hashed passwords, "keep me signed in") |
 | 🔍 Single analyzer | Paste a posting → verdict, trust meter, SHAP words, red flags, AI summary, PDF report |
 | 📁 Bulk CSV | Score many postings at once through the API's batch endpoint, download results |
 | 🌐 Live scanner | Scrape Naukri / Internshala with Selenium and score each job (local use; needs Chrome) |
@@ -61,6 +62,7 @@ JobGuard/
 ├── src/
 │   ├── config.py               # all settings (env vars / Streamlit secrets)
 │   ├── api_client.py           # dashboard -> API client
+│   ├── auth/                   # login page, user store (password hashing, sessions)
 │   ├── preprocessing/          # data_cleaning.py (NLTK text cleaning)
 │   ├── ml/                     # vectorizer, SMOTE, model_training, hybrid_model_training, predictors
 │   ├── explainability/         # shap_explainer, rule_engine, red_flags, company_verifier,
@@ -94,7 +96,7 @@ uvicorn main:app --reload
 streamlit run app.py
 ```
 
-The dashboard's sidebar shows whether it is connected to the API or running in local mode.
+The first time, click *Create account* on the login page. The sidebar shows whether the dashboard is connected to the API or running in local mode.
 
 To retrain the models: install the training packages listed at the top of `requirements.txt`, then run `python -m src.ml.model_training` (needs `data/fake_job_postings.csv` from the Kaggle dataset below).
 
@@ -130,6 +132,10 @@ Copy `.env.example` to `.env`. On Streamlit Community Cloud use *Secrets* instea
 | `JOBGUARD_RATE_LIMIT` / `_BATCH_RATE_LIMIT` | 60 / 10 per min | Per-IP request limits |
 | `JOBGUARD_MAX_UPLOAD_MB` / `_MAX_BATCH_ROWS` | 5 / 2000 | Batch upload limits |
 | `JOBGUARD_ENABLE_SCRAPING` | `true` | Set `false` on hosts without Chrome |
+| `JOBGUARD_AUTH_REQUIRED` | `true` | Set `false` to skip the login page while developing |
+| `JOBGUARD_AUTH_DB_PATH` | `data/users.db` | Where email/password accounts are stored |
+| `JOBGUARD_SESSION_DAYS` | `30` | How long "Keep me signed in" lasts |
+| `JOBGUARD_ALLOW_SIGNUP` | `true` | Set `false` to stop new accounts being created |
 
 ## Dataset
 
@@ -169,6 +175,28 @@ pytest -q
 
 Tests run offline (no Gemini key, web search or Chrome needed). GitHub Actions runs them on every push.
 
+## Login
+
+Everything is behind a login page. People can sign in two ways:
+
+- **Email and password.** Accounts live in a local SQLite file (`data/users.db`). Passwords are never stored, only a salted scrypt hash. Five wrong passwords lock an account for 15 minutes. "Keep me signed in" uses a random session token in a browser cookie, so a refresh does not log you out; only a hash of the token is kept on the server.
+- **Google.** Uses Streamlit's built-in sign-in. It needs a free Google OAuth client:
+  1. In the [Google Cloud Console](https://console.cloud.google.com/) create a project, set up the *OAuth consent screen* (External, add yourself as a test user), then *Credentials → Create credentials → OAuth client ID → Web application*.
+  2. Add the redirect URI `http://localhost:8501/oauth2callback` (and, after deploying, `https://<your-app>.streamlit.app/oauth2callback`).
+  3. Create `.streamlit/secrets.toml` (it is git-ignored) with:
+     ```toml
+     [auth]
+     redirect_uri = "http://localhost:8501/oauth2callback"
+     cookie_secret = "any-long-random-string"
+     client_id = "xxxx.apps.googleusercontent.com"
+     client_secret = "xxxx"
+     server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+     ```
+     A random `cookie_secret` comes from `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+  4. Restart the dashboard. The "Continue with Google" button turns on.
+
+Good to know: there is no "forgot password" email yet, and on Streamlit Community Cloud the accounts file is wiped whenever the app restarts (use Google sign-in there, or point `JOBGUARD_AUTH_DB_PATH` at a persistent disk). Passwords and session cookies should only be used over HTTPS in production.
+
 ## Deployment
 
 **Dashboard on Streamlit Community Cloud (free):**
@@ -177,6 +205,13 @@ Tests run offline (no Gemini key, web search or Chrome needed). GitHub Actions r
    ```toml
    GEMINI_API_KEY = "your_key"
    JOBGUARD_ENABLE_SCRAPING = "false"
+
+   [auth]
+   redirect_uri = "https://<your-app>.streamlit.app/oauth2callback"
+   cookie_secret = "any-long-random-string"
+   client_id = "xxxx.apps.googleusercontent.com"
+   client_secret = "xxxx"
+   server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
    ```
 3. With no API configured the dashboard runs in local mode (the sidebar says so); only live scraping is unavailable.
 
