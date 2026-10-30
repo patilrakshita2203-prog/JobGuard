@@ -3,7 +3,7 @@ src/explainability/knowledge_graph_realtime_v2.py
 JobGuard — Real-Time Knowledge Graph with Skill Validation
 
 A small, hand-curated reference map of typical skills and salaries per role
-(17 example postings across 7 roles, written into this file). It is NOT scraped
+(14 example postings across 7 roles, written into this file). It is NOT scraped
 live: treat it as a lightweight sanity check on "does the skill list fit the
 job title", not as market data.
 
