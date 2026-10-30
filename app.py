@@ -211,7 +211,7 @@ st.markdown("""
         border: 1px solid #334155;
         color: #f8fafc;
         border-radius: 12px;
-        padding: 1.75rem;
+        padding: 1.5rem 0.5rem;
         text-align: center;
         transition: all 0.3s ease;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
@@ -225,18 +225,20 @@ st.markdown("""
     
     .metric-value {
         font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 2.5rem;
+        font-size: clamp(1.5rem, 2.2vw, 2.5rem);
         font-weight: 700;
         color: #f8fafc;
         margin: 0.5rem 0;
         line-height: 1;
+        white-space: nowrap;   /* "81.8%" used to break onto two lines */
     }
     
     .metric-label {
-        font-size: 0.8rem;
+        font-size: 0.72rem;
         color: #cbd5e1;
         text-transform: uppercase;
-        letter-spacing: 0.4px;
+        letter-spacing: 0.2px;
+        word-break: normal;
         font-weight: 600;
         margin-top: 0.5rem;
     }

@@ -97,3 +97,9 @@ def test_internshala_scan_and_ai_analysis_do_not_crash(monkeypatch):
     _click(at, "Generate AI Risk Analysis")
     assert not at.exception
     assert at.session_state["scan_ai"][0] == 1
+
+
+def test_metric_numbers_do_not_wrap_onto_two_lines():
+    """Regression: 81.8% was split into 81. and 8% inside the narrow metric cards."""
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert "white-space: nowrap" in source
