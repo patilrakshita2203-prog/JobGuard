@@ -20,17 +20,6 @@ Fake postings that ask for a registration fee, move candidates to WhatsApp or pr
 |:---:|:---:|:---:|:---:|:---:|:---:|
 | 0.83 | 0.988 | 0.88 | 0.79 | 3,576 postings, 173 fraudulent | 110 |
 
-## Screenshots
-
-![Login page](screenshots/login.png)
-*Login with Google or with an email and password.*
-
-![Analysis of a scam posting](screenshots/analysis.png)
-*Single posting analysis: verdict, trust score and fraud risk, with the sidebar menu on the left.*
-
-![Model analytics](screenshots/analytics.png)
-*Model performance and the terms most associated with scams.*
-
 ## Features
 
 - **Single posting analysis** with a verdict, trust score, SHAP word contributions, red flags, a written summary and a downloadable PDF report.

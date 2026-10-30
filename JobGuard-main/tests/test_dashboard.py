@@ -1,0 +1,105 @@
+"""Headless smoke test of the Streamlit dashboard (local mode, no API, no network)."""
+
+import pytest
+
+from conftest import ROOT, needs_models
+
+pytestmark = needs_models
+
+AppTest = pytest.importorskip("streamlit.testing.v1").AppTest
+
+
+@pytest.fixture(scope="module")
+def app():
+    return AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+
+
+def _click(at, label_part):
+    return [b for b in at.button if b.label and label_part in b.label][0].click().run()
+
+
+def test_dashboard_loads_without_errors(app):
+    assert not app.exception
+
+
+def test_pages_are_a_vertical_menu_in_the_sidebar_not_tabs(app):
+    assert len(app.tabs) == 0
+    menu = app.sidebar.radio(key="nav_page")
+    assert len(menu.options) == 5
+    assert [o.strip() for o in menu.options][0].endswith("Single Analyzer")
+
+
+def test_keywords_line_is_gone_from_the_header(app):
+    text = " ".join(m.value for m in app.markdown)
+    assert "SHAP Explainability" not in text
+    assert "JobGuard Pro" in text
+
+
+@pytest.mark.parametrize("index,heading", [
+    (0, "Analyze a Job Posting"),
+    (1, "Bulk Job Analysis"),
+    (2, "Live Portal Scanner"),
+    (3, "Salary Anomaly Detector"),
+    (4, "System Analytics"),
+])
+def test_every_page_opens_from_the_menu(index, heading):
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+    menu = at.sidebar.radio(key="nav_page")
+    menu.set_value(menu.options[index]).run()
+    assert not at.exception
+    assert heading in " ".join(m.value for m in at.markdown)
+
+
+def test_demo_button_fills_the_form_and_analysis_flags_the_scam():
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+    _click(at, "Scam Demo")
+    assert at.text_input[1].value == "FastMoney Solutions"
+    _click(at, "ANALYZE JOB")
+    assert not at.exception
+    text = " ".join(m.value for m in at.markdown)
+    assert "LIKELY SCAM" in text
+    assert "Scam Red Flags" in text
+
+
+def test_results_survive_the_ai_analysis_button():
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+    _click(at, "Scam Demo")
+    _click(at, "ANALYZE JOB")
+    _click(at, "Generate AI Risk Analysis")
+    assert not at.exception
+    text = " ".join(m.value for m in at.markdown)
+    assert "LIKELY SCAM" in text, "results used to disappear after pressing a button inside them"
+    assert "Recommendation" in text
+
+
+def test_internshala_scan_and_ai_analysis_do_not_crash(monkeypatch):
+    """Regression: Internshala jobs have no .requirements/.benefits/.experience attributes."""
+    pytest.importorskip("selenium")
+    import src.scraper.internshala_scraper as ish
+
+    def fake_search(self, keyword="python", max_jobs=10):
+        return [
+            ish.JobPosting(title="Python Intern", company="Acme", location="Remote",
+                           salary_range="₹ 10,000 /month", description="Work on APIs with Python and SQL."),
+            ish.JobPosting(title="Data Entry", company="FastMoney", location="Remote",
+                           salary_range="Not Disclosed", description="Registration fee Rs 500, WhatsApp to join."),
+        ]
+
+    monkeypatch.setattr(ish.InternshalaScraper, "search_jobs", fake_search)
+
+    at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=180).run()
+    menu = at.sidebar.radio(key="nav_page")
+    menu.set_value(menu.options[2]).run()   # Live Scanner
+    [s for s in at.selectbox if s.label and "Platform" in s.label][0].select("Internshala").run()
+    _click(at, "START SCAN")
+    assert not at.exception and not at.error
+    [s for s in at.selectbox if s.key == "scan_job_idx"][0].select(1).run()
+    _click(at, "Generate AI Risk Analysis")
+    assert not at.exception
+    assert at.session_state["scan_ai"][0] == 1
+
+
+def test_metric_numbers_do_not_wrap_onto_two_lines():
+    """Regression: 81.8% was split into 81. and 8% inside the narrow metric cards."""
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert "white-space: nowrap" in source

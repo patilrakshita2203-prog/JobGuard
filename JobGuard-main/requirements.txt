@@ -1,0 +1,40 @@
+# JobGuard runtime dependencies (API + dashboard). UTF-8, pinned.
+#
+# Only for retraining the models (not needed to run the app):
+#   pip install imbalanced-learn xgboost torch transformers sentence-transformers seaborn
+# Only for running the tests:
+#   pip install pytest httpx
+
+# Web / API
+fastapi==0.150.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+streamlit==1.55.0
+requests==2.32.5
+python-dotenv==1.2.2
+
+# ML / NLP
+numpy==2.4.3
+pandas==2.3.3
+scikit-learn==1.8.0
+scipy==1.17.1
+joblib==1.5.3
+nltk==3.9.3
+shap==0.51.0
+matplotlib==3.10.8
+
+# Login (Google sign-in uses Streamlit's built-in OpenID Connect, which needs Authlib)
+Authlib==1.9.1
+
+# Dashboard
+plotly==6.6.0
+beautifulsoup4==4.14.3
+reportlab==4.4.10
+
+# AI risk analysis + company check
+google-generativeai==0.8.6
+ddgs==9.16.0
+
+# Live scraping (optional at runtime: needs a local Chrome browser)
+selenium==4.51.0
+webdriver-manager==4.1.2
