@@ -1,231 +1,268 @@
-# 🛡️ JobGuard — Explainable Fake Job Detection
+# JobGuard
 
-> Paste a job posting, get a scam verdict **and the reasons behind it**. A FastAPI backend serves the ML model, SHAP explanations, rule-based red flags and an AI risk summary; a Streamlit dashboard sits on top.
+Explainable fake job detection for job seekers. A machine learning model scores a job posting, SHAP and rule-based checks explain why it looks suspicious, and the result is served through a login-protected dashboard and a REST API. The dashboard can also scan live listings from Naukri and Internshala and score each one.
 
 [![CI](https://github.com/patilrakshita2203-prog/JobGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/patilrakshita2203-prog/JobGuard/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi)](https://fastapi.tiangolo.com)
-[![Streamlit](https://img.shields.io/badge/Streamlit-dashboard-red?logo=streamlit)](https://streamlit.io)
-[![SHAP](https://img.shields.io/badge/SHAP-explainable_AI-green)](https://shap.readthedocs.io)
+![Python](https://img.shields.io/badge/python-3.12-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688)
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E)
 
-**Live demo:** _add your Streamlit link here after deploying (see [Deployment](#deployment))_
+## Overview
 
----
+Fake postings that ask for a registration fee, move candidates to WhatsApp or promise a guaranteed placement are common, and freshers are the usual target. JobGuard combines three independent signals so that a verdict is never a bare number:
 
-## What it does
+1. **A trained classifier** (TF-IDF with Logistic Regression) that outputs a fraud probability.
+2. **Word-level explanations** (SHAP) showing which words pushed the score up or down.
+3. **Rule-based red flags** (English and Hindi keywords) for patterns such as upfront fees, WhatsApp-only hiring and free-email recruiters.
 
-Fake job postings target freshers with registration fees, "guaranteed" placements and WhatsApp-only hiring. JobGuard scores a posting and explains *why*:
+| Held-out F1 | ROC-AUC | Recall | Precision | Test set | Automated tests |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| 0.83 | 0.988 | 0.88 | 0.79 | 3,576 postings, 173 fraudulent | 110 |
 
-1. **ML score** — TF-IDF + Logistic Regression gives a fraud probability and a 0-100 trust score.
-2. **SHAP explanation** — the words that pushed the score towards fake or genuine.
-3. **Red-flag rules** — fees, WhatsApp/Telegram hiring, free-email recruiters, guaranteed jobs, sensitive-data requests (English + Hindi keywords).
-4. **AI risk analysis** — Gemini summarises the verified facts; without an API key a deterministic rule-based summary is used instead.
+## Screenshots
 
-> The ML model alone can miss India-style scams (see [Limitations](#limitations)), which is why the rule-based red flags run next to it.
+![Login page](screenshots/login.png)
+*Login with Google or with an email and password.*
+
+![Analysis of a scam posting](screenshots/analysis.png)
+*Single posting analysis: verdict, trust score and fraud risk, with the sidebar menu on the left.*
+
+![Model analytics](screenshots/analytics.png)
+*Model performance and the terms most associated with scams.*
 
 ## Features
 
-| Feature | Description |
-|---|---|
-| 🔐 Login | Sign in with Google or with an email and password (accounts, hashed passwords, "keep me signed in") |
-| 🔍 Single analyzer | Paste a posting → verdict, trust meter, SHAP words, red flags, AI summary, PDF report |
-| 📁 Bulk CSV | Score many postings at once through the API's batch endpoint, download results |
-| 🌐 Live scanner | Scrape Naukri / Internshala with Selenium and score each job (local use; needs Chrome) |
-| 💰 Salary checker | Flags salaries far above the benchmark range for a role |
-| 🧠 Skill check | Compares the skills in a posting with a small built-in reference map for the detected role (curated examples, not live data) |
-| 🏢 Company check | Looks for a website whose domain matches the company name (optional, slower) |
-| 📊 Analytics | Real model metrics, strongest scam-indicating terms, recent prediction history |
-| 🔌 REST API | `/predict`, `/predict/batch`, `/analyze`, `/stats`, `/history`, `/health` with OpenAPI docs |
+- **Single posting analysis** with a verdict, trust score, SHAP word contributions, red flags, a written summary and a downloadable PDF report.
+- **Bulk analysis** of a CSV file through the API's batch endpoint.
+- **Live scanning** of Naukri and Internshala listings with Selenium (see [Live job scanning](#live-job-scanning)).
+- **Salary check** that compares an offered salary with approximate reference ranges per role.
+- **Skill check** that compares the skills in a posting with a small reference map for the detected role.
+- **Optional company lookup** that searches the web for a website whose domain matches the company name.
+- **Written summaries** from Gemini, with a deterministic rule-based fallback when no key is set or the call fails.
+- **Authentication** with Google or email and password, hashed passwords, lockout and persistent sessions.
+- **REST API** with OpenAPI docs, optional API key, rate limiting and upload limits.
 
 ## Architecture
 
-```
-┌──────────────────────┐   HTTP (JSON / CSV)   ┌─────────────────────────────────────────┐
-│  Streamlit dashboard │ ────────────────────▶ │  FastAPI backend (main.py)              │
-│  app.py              │ ◀──────────────────── │  /predict  /predict/batch  /analyze     │
-│  api_client.py       │                       │  /stats  /history  /health              │
-└──────────┬───────────┘                       └───────────────┬─────────────────────────┘
-           │ API unreachable?                                   │
-           ▼                                                    ▼
-  falls back to the local model          TF-IDF + Logistic Regression ─▶ SHAP explainer
-  (JOBGUARD_MODE=auto)                   Red-flag rules ─▶ Rule engine ─▶ Gemini / rule-based summary
+```mermaid
+flowchart LR
+    User([User]) --> Login["Login<br/>Google or email and password"]
+    Login --> Dash["Streamlit dashboard"]
+    Dash -->|"REST, optional API key"| API["FastAPI backend"]
+    Dash -.->|"API unreachable"| Local["Local in-process model"]
+    Dash --> Scraper["Selenium scrapers<br/>Naukri, Internshala"]
+    Scraper -->|"listing text"| API
+    API --> Model["TF-IDF and<br/>Logistic Regression"]
+    API --> Shap["SHAP explainer"]
+    API --> Rules["Red-flag rules"]
+    API --> LLM["Gemini summary<br/>rule-based fallback"]
+    API --> Hist[("SQLite<br/>prediction history")]
+    Login --> Users[("SQLite<br/>users and sessions")]
 ```
 
-The dashboard calls the API when it is reachable and otherwise loads the model itself, so it also works as a single deployed app.
+The dashboard uses the API when it is reachable and otherwise loads the model itself, so the same code runs as a single deployed app or as two services.
+
+## How a posting is scored
+
+```mermaid
+flowchart TD
+    A["Posting text<br/>title, company, description"] --> B["Clean text<br/>lowercase, strip HTML, URLs, digits and stop words, lemmatize"]
+    A --> R["Red-flag rules on the raw text<br/>fees, WhatsApp-only, guarantees, free-email recruiters"]
+    B --> C["TF-IDF features<br/>10,000 terms, 1 to 2 word n-grams"]
+    C --> D["Logistic Regression<br/>fraud probability"]
+    D --> E["SHAP<br/>words that moved the score"]
+    D --> F["Risk band<br/>SAFE, LOW, MEDIUM, HIGH"]
+    R --> G["Result"]
+    E --> G
+    F --> G
+    G --> H["Optional: company website lookup<br/>and written summary"]
+```
+
+Risk bands follow the fraud probability: below 0.3 is SAFE, 0.3 to 0.5 LOW, 0.5 to 0.8 MEDIUM and 0.8 or above HIGH. The rules run on the raw text, not the cleaned text, because cleaning removes digits, symbols and non-English characters, which are exactly what some rules look for (amounts and Hindi keywords).
+
+## Live job scanning
+
+The scanner exists to test the model on real, current listings, not only on the research dataset. It collects listing cards from two portals and scores each one with the same pipeline used for pasted postings.
+
+```mermaid
+flowchart TD
+    A["User chooses portal, keyword and number of listings"] --> B["Selenium starts Chrome"]
+    B --> C["Open the portal's search page for the keyword"]
+    C --> D["Wait for the page to render<br/>scroll once on Internshala"]
+    D --> E["Locate listing cards in the page HTML"]
+    E --> F["Extract title, company, location,<br/>salary, experience and the card text"]
+    F --> G["Normalize salary and experience<br/>for example 3-6 Lacs PA"]
+    G --> H["Score every listing<br/>model, SHAP, red flags"]
+    H --> I["Table of listings with risk scores<br/>and a summary for any selected listing"]
+```
+
+| Portal | Search page | What is read |
+|---|---|---|
+| Naukri | `naukri.com/<keyword>-jobs` | Listing cards: title, company, location, salary, experience and card text |
+| Internshala | `internshala.com/jobs/<keyword>-jobs` | Listing cards: title, company, location, stipend and card text |
+
+- **Why Selenium.** Naukri builds its result list with JavaScript, so a plain HTTP request does not return the listings, and Internshala loads more results as the page scrolls. Selenium drives a real Chrome window for both, which is why scanning only works when JobGuard runs on a machine with Chrome installed.
+- **Salary and experience parsing.** Naukri writes salaries such as `3-6 Lacs PA` and hides the rupee sign in an icon. `src/scraper/naukri_parsing.py` reads the salary and experience elements and falls back to pattern matching on the card text if the page layout changes. It is covered by unit tests with realistic card HTML.
+- **Scope and limits.** Between 5 and 25 listings per scan, fixed waiting times between steps, search result pages only and nothing behind a login. Listings are not saved and never used for training; the only trace is the job title and score that the API records in its prediction history, which `JOBGUARD_LOG_PREDICTIONS=false` turns off.
+- **Responsible use.** Portals may restrict automated access in their terms of use. Scanning is intended for personal and educational use at low volume, and `JOBGUARD_ENABLE_SCRAPING=false` switches it off for hosted deployments.
+- **Known limitation.** Only the card text is scored, which is shorter than a full posting. Scores on scanned listings are therefore less reliable than scores on a pasted description.
+
+## Machine learning
+
+The model is trained on **EMSCAD** (Employment Scam Aegean Dataset, [Kaggle](https://www.kaggle.com/datasets/shivamb/real-or-fake-fake-jobposting-prediction)): 17,880 postings, 866 of them fraudulent (4.84%). The training data is not scraped, and the CSV is not stored in this repository.
+
+```mermaid
+flowchart LR
+    A["EMSCAD<br/>17,880 postings"] --> B["Clean text"]
+    B --> C["Stratified 80/20 split"]
+    C --> D["TF-IDF<br/>fitted on the training split"]
+    D --> E["SMOTE oversampling<br/>training split only"]
+    E --> F["Train and compare<br/>Logistic Regression, Random Forest, XGBoost"]
+    F --> G["Select by F1 on the test set"]
+    G --> H["Save model and vectorizer"]
+```
+
+Results on the held-out test set (3,576 postings, 173 fraudulent):
+
+| Model | Precision | Recall | F1 | ROC-AUC |
+|---|:---:|:---:|:---:|:---:|
+| **Logistic Regression (deployed)** | 0.785 | 0.884 | **0.832** | 0.988 |
+| Random Forest | 0.922 | 0.682 | 0.784 | 0.986 |
+| TF-IDF and BERT embeddings with Logistic Regression (experiment) | 0.655 | 0.890 | 0.755 | 0.983 |
+
+Logistic Regression catches 153 of the 173 scams and raises 42 false alarms on 3,403 genuine postings. It has the best F1 of the three, ahead of the Random Forest and the TF-IDF and BERT experiment, and it is fast and exactly explainable. An XGBoost run is stored in `models/training_results.json` but is excluded here: it was affected by a mismatch between dense training input and sparse evaluation input, which is fixed in `src/ml/model_training.py` and covered by a regression test, and the saved numbers have not been regenerated yet.
+
+## Explainability and red flags
+
+- **SHAP** is computed against an empty posting as the baseline, so every word shown is a word that is actually in the text.
+- **Rule-based flags** cover upfront payments, guaranteed jobs or income, WhatsApp or Telegram hiring, requests for sensitive documents or bank details, investment or crypto, no interview, pressure tactics, unrealistic earnings, free-email recruiters and giveaways. Each flag shows the matching phrase.
+- **Why both exist.** The classifier learned from an older, mostly US dataset, so it has absorbed some wrong associations for Indian postings, for example that "whatsapp" leans genuine. The rules catch the patterns the model under-weights, so the dashboard shows the red flags next to the model verdict.
+
+## Authentication
+
+- Sign in with **Google** (Streamlit's built-in OpenID Connect) or with an **email and password**.
+- Passwords are stored only as salted scrypt hashes. Five wrong attempts lock an account for 15 minutes, and unknown emails and wrong passwords return the same message.
+- "Keep me signed in" uses a random session token in a browser cookie. Only a hash of the token is stored on the server.
+- To enable Google, create an OAuth client in the [Google Cloud Console](https://console.cloud.google.com/), add `http://localhost:8501/oauth2callback` as a redirect URI and put the keys in `.streamlit/secrets.toml` (git-ignored):
+
+```toml
+[auth]
+redirect_uri = "http://localhost:8501/oauth2callback"
+cookie_secret = "any-long-random-string"
+client_id = "xxxx.apps.googleusercontent.com"
+client_secret = "xxxx"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+```
+
+## REST API
+
+Interactive documentation is served at `/docs`.
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /predict` | Score one posting: verdict, probability, trust score, SHAP words, red flags |
+| `POST /predict/batch` | Upload a CSV with a `description` column and receive it back with predictions |
+| `POST /analyze` | Facts, red flags and a written summary for one posting |
+| `GET /stats` | Training metrics |
+| `GET /history` | Recent predictions logged by the API |
+| `GET /health` | Liveness, model status and whether Gemini is configured |
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Work From Home", "description": "Registration fee of Rs 500 required. Contact on WhatsApp."}'
+```
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Machine learning | scikit-learn, imbalanced-learn (SMOTE), SHAP, NLTK; sentence-transformers and XGBoost for experiments |
+| Backend | FastAPI, Pydantic, Uvicorn, SQLite |
+| Dashboard | Streamlit, Plotly, ReportLab (PDF) |
+| Data collection | Selenium, Beautiful Soup |
+| Language model | Google Gemini with a rule-based fallback |
+| Quality | pytest (110 tests), GitHub Actions |
+
+## Getting started
+
+Tested with Python 3.12 (the version used in CI). Chrome is needed only for live scanning.
+
+```bash
+git clone https://github.com/patilrakshita2203-prog/JobGuard.git
+cd JobGuard
+python -m venv venv
+venv\Scripts\activate            # macOS and Linux: source venv/bin/activate
+pip install -r requirements.txt
+copy .env.example .env           # macOS and Linux: cp .env.example .env
+```
+
+Start the two services in separate terminals:
+
+```bash
+uvicorn main:app --reload        # API at http://127.0.0.1:8000/docs
+streamlit run app.py             # dashboard at http://localhost:8501
+```
+
+Open the dashboard and choose **Create account** the first time. A Gemini key in `.env` is optional. Without it the written summary is generated by rules.
+
+Run the tests with `pip install pytest httpx` followed by `pytest -q`. They run offline: no Gemini key, web search or Chrome is needed.
+
+To retrain, install the training packages listed at the top of `requirements.txt`, place `fake_job_postings.csv` in `data/` and run `python -m src.ml.model_training`.
+
+## Configuration
+
+Set these in `.env` or the environment. `.env.example` lists all of them.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GEMINI_API_KEY` | none | Enables Gemini summaries |
+| `JOBGUARD_API_URL` | `http://127.0.0.1:8000` | Where the dashboard finds the API |
+| `JOBGUARD_MODE` | `auto` | `auto` uses the API if reachable, `api` requires it, `local` never calls it |
+| `JOBGUARD_API_KEY` | none | If set, the API requires an `X-API-Key` header |
+| `JOBGUARD_AUTH_REQUIRED` | `true` | Set `false` to skip the login page while developing |
+| `JOBGUARD_ENABLE_SCRAPING` | `true` | Set `false` on hosts without Chrome |
+| `JOBGUARD_RATE_LIMIT` | `60` | API requests per minute per IP |
 
 ## Project structure
 
 ```
 JobGuard/
-├── app.py                      # Streamlit dashboard (entry point)
-├── main.py                     # FastAPI backend (entry point)
+├── app.py                     Streamlit dashboard
+├── main.py                    FastAPI backend
 ├── src/
-│   ├── config.py               # all settings (env vars / Streamlit secrets)
-│   ├── api_client.py           # dashboard -> API client
-│   ├── auth/                   # login page, user store (password hashing, sessions)
-│   ├── preprocessing/          # data_cleaning.py (NLTK text cleaning)
-│   ├── ml/                     # vectorizer, SMOTE, model_training, hybrid_model_training, predictors
-│   ├── explainability/         # shap_explainer, rule_engine, red_flags, company_verifier,
-│   │                           # prompt_builder, llm_analyzer, fallback_analyzer, knowledge_graph_realtime
-│   ├── reporting/              # pdf_reporter.py
-│   └── scraper/                # Naukri + Internshala scrapers, naukri_parsing.py, selenium_scraper.py
-├── models/                     # best_model.joblib, tfidf_vectorizer.joblib, metrics JSON
-├── sample_data/jobs.csv        # demo CSV for the bulk tab
-├── tests/                      # pytest suite (API, dashboard, rules, client, training)
-├── screenshots/
-├── .github/workflows/ci.yml    # runs the tests on every push
-└── requirements.txt            # pinned runtime dependencies
+│   ├── config.py              Settings from environment variables and Streamlit secrets
+│   ├── api_client.py          Dashboard to API client
+│   ├── auth/                  Login page and user store
+│   ├── preprocessing/         Text cleaning
+│   ├── ml/                    Vectorizer, SMOTE, training scripts, predictors
+│   ├── explainability/        SHAP, red flags, rule engine, company lookup, Gemini, skill check
+│   ├── reporting/             PDF report
+│   └── scraper/               Naukri and Internshala scrapers, card parsing
+├── models/                    Trained model, vectorizer and metrics
+├── sample_data/jobs.csv       Example file for bulk analysis
+├── screenshots/               Images used in this README
+├── tests/                     pytest suite
+└── .github/workflows/ci.yml   Runs the tests on every push
 ```
-
-## Quick start
-
-```bash
-git clone https://github.com/patilrakshita2203-prog/JobGuard.git
-cd JobGuard
-
-python -m venv venv
-source venv/bin/activate            # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-
-cp .env.example .env                # add GEMINI_API_KEY (optional)
-
-# terminal 1 - backend (docs at http://127.0.0.1:8000/docs)
-uvicorn main:app --reload
-
-# terminal 2 - dashboard (http://localhost:8501)
-streamlit run app.py
-```
-
-The first time, click *Create account* on the login page. The sidebar shows whether the dashboard is connected to the API or running in local mode.
-
-To retrain the models: install the training packages listed at the top of `requirements.txt`, then run `python -m src.ml.model_training` (needs `data/fake_job_postings.csv` from the Kaggle dataset below).
-
-## API
-
-```bash
-curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" -d '{
-  "title": "Work From Home",
-  "description": "URGENT hiring! Registration fee Rs 500 required. Contact on WhatsApp."
-}'
-```
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /predict` | Score one posting: verdict, probability, trust score, SHAP words, red flags |
-| `POST /predict/batch` | Upload a CSV with a `description` column, get the CSV back with predictions |
-| `POST /analyze` | Rule-engine facts + red flags + AI (or rule-based) risk summary |
-| `GET /stats` | Training metrics for all models |
-| `GET /history` | Recent predictions logged by the API |
-| `GET /health` | Liveness, model status, whether Gemini is configured |
-
-## Configuration
-
-Copy `.env.example` to `.env`. On Streamlit Community Cloud use *Secrets* instead (same names, TOML format).
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `GEMINI_API_KEY` | – | Enables Gemini summaries (falls back to rules without it) |
-| `JOBGUARD_API_URL` | `http://127.0.0.1:8000` | Where the dashboard finds the API |
-| `JOBGUARD_MODE` | `auto` | `auto` use API if reachable, `api` require it, `local` never call it |
-| `JOBGUARD_API_KEY` | – | If set, the API requires an `X-API-Key` header (the dashboard sends it) |
-| `JOBGUARD_CORS_ORIGINS` | localhost:8501 | Browser origins allowed to call the API |
-| `JOBGUARD_RATE_LIMIT` / `_BATCH_RATE_LIMIT` | 60 / 10 per min | Per-IP request limits |
-| `JOBGUARD_MAX_UPLOAD_MB` / `_MAX_BATCH_ROWS` | 5 / 2000 | Batch upload limits |
-| `JOBGUARD_ENABLE_SCRAPING` | `true` | Set `false` on hosts without Chrome |
-| `JOBGUARD_AUTH_REQUIRED` | `true` | Set `false` to skip the login page while developing |
-| `JOBGUARD_AUTH_DB_PATH` | `data/users.db` | Where email/password accounts are stored |
-| `JOBGUARD_SESSION_DAYS` | `30` | How long "Keep me signed in" lasts |
-| `JOBGUARD_ALLOW_SIGNUP` | `true` | Set `false` to stop new accounts being created |
-
-## Dataset
-
-**EMSCAD** (Employment Scam Aegean Dataset) — [Kaggle](https://www.kaggle.com/datasets/shivamb/real-or-fake-fake-jobposting-prediction): 17,880 postings, 866 fraudulent (4.84%). The CSV is not stored in this repo.
-
-## Model performance
-
-Stratified 80/20 split → **3,576 test postings (173 fraudulent)**. SMOTE (`sampling_strategy=0.3`) is applied to the training split only. Source: `models/training_results.json`.
-
-| Model | Precision | Recall | F1 | ROC-AUC |
-|---|---|---|---|---|
-| **Logistic Regression (deployed)** | 0.785 | 0.884 | **0.832** | 0.988 |
-| Random Forest | 0.922 | 0.682 | 0.784 | 0.986 |
-| Hybrid TF-IDF + BERT + LR (experiment) | 0.655 | 0.890 | 0.755 | 0.983 |
-| XGBoost | 0.048 | 1.000 | 0.092 | 0.458 |
-
-Logistic Regression's confusion matrix: 3,361 genuine correctly kept, 42 false alarms, 153 scams caught, 20 scams missed.
-
-**About the XGBoost row:** those numbers come from a training bug that is now fixed in `src/ml/model_training.py` (XGBoost was trained on dense arrays but scored on sparse ones, so it labelled every posting fake). The table above is from the saved run; re-run `python model_training.py` to refresh it. Logistic Regression is expected to stay the best model.
-
-## Limitations
-
-- **Dataset age and language.** EMSCAD is an older, mostly English, US-centred dataset. Typical Indian fee-and-WhatsApp scams look different, so the ML score can be low for them. That is why red-flag rules run alongside the model.
-- **Few positives.** 866 fraudulent postings; metrics on 173 test positives are noisy.
-- **The saved models were trained before two fixes.** TF-IDF was fitted on the full dataset before the train/test split (a small leak), and the best model is picked by test-set F1. `src/ml/model_training.py` now fits TF-IDF on the training split only; retrain to apply it. For a rigorous comparison, add a separate validation split.
-- **The model learned some wrong word associations.** For example "whatsapp" and "registration" lean *genuine* in the old US data. SHAP now explains the model faithfully, which exposes this. The rule-based red flags exist to cover it.
-- **No duplicate audit.** The dataset contains near-duplicate postings that may appear in both train and test splits and flatter the scores.
-- **Not a verdict.** JobGuard is an educational tool. Verify employers through official channels and report fraud at [cybercrime.gov.in](https://cybercrime.gov.in).
-- **Scraping** may break when portals change their pages and can conflict with their terms of use; it is off by default on hosted deployments.
-
-## Testing
-
-```bash
-pip install -r requirements.txt pytest httpx
-pytest -q
-```
-
-Tests run offline (no Gemini key, web search or Chrome needed). GitHub Actions runs them on every push.
-
-## Login
-
-Everything is behind a login page. People can sign in two ways:
-
-- **Email and password.** Accounts live in a local SQLite file (`data/users.db`). Passwords are never stored, only a salted scrypt hash. Five wrong passwords lock an account for 15 minutes. "Keep me signed in" uses a random session token in a browser cookie, so a refresh does not log you out; only a hash of the token is kept on the server.
-- **Google.** Uses Streamlit's built-in sign-in. It needs a free Google OAuth client:
-  1. In the [Google Cloud Console](https://console.cloud.google.com/) create a project, set up the *OAuth consent screen* (External, add yourself as a test user), then *Credentials → Create credentials → OAuth client ID → Web application*.
-  2. Add the redirect URI `http://localhost:8501/oauth2callback` (and, after deploying, `https://<your-app>.streamlit.app/oauth2callback`).
-  3. Create `.streamlit/secrets.toml` (it is git-ignored) with:
-     ```toml
-     [auth]
-     redirect_uri = "http://localhost:8501/oauth2callback"
-     cookie_secret = "any-long-random-string"
-     client_id = "xxxx.apps.googleusercontent.com"
-     client_secret = "xxxx"
-     server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
-     ```
-     A random `cookie_secret` comes from `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
-  4. Restart the dashboard. The "Continue with Google" button turns on.
-
-Good to know: there is no "forgot password" email yet, and on Streamlit Community Cloud the accounts file is wiped whenever the app restarts (use Google sign-in there, or point `JOBGUARD_AUTH_DB_PATH` at a persistent disk). Passwords and session cookies should only be used over HTTPS in production.
 
 ## Deployment
 
-**Dashboard on Streamlit Community Cloud (free):**
-1. <https://share.streamlit.io> → *New app* → this repo, branch `main`, main file `app.py`.
-2. *Advanced settings → Secrets*:
-   ```toml
-   GEMINI_API_KEY = "your_key"
-   JOBGUARD_ENABLE_SCRAPING = "false"
+**Dashboard on Streamlit Community Cloud.** Create an app from this repository with `app.py` as the main file. Under Secrets, set `GEMINI_API_KEY`, `JOBGUARD_ENABLE_SCRAPING = "false"` and the `[auth]` block shown above with the redirect URI `https://<your-app>.streamlit.app/oauth2callback`. Without an API the dashboard runs the model itself.
 
-   [auth]
-   redirect_uri = "https://<your-app>.streamlit.app/oauth2callback"
-   cookie_secret = "any-long-random-string"
-   client_id = "xxxx.apps.googleusercontent.com"
-   client_secret = "xxxx"
-   server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
-   ```
-3. With no API configured the dashboard runs in local mode (the sidebar says so); only live scraping is unavailable.
+**API on Render (optional).** Create a web service with build command `pip install -r requirements.txt`, start command `uvicorn main:app --host 0.0.0.0 --port $PORT` and health check path `/health`. Set `GEMINI_API_KEY`, `JOBGUARD_API_KEY` and `JOBGUARD_CORS_ORIGINS`, then point the dashboard at it with `JOBGUARD_API_URL` and the same `JOBGUARD_API_KEY`.
 
-**API on Render (optional, so the dashboard really talks to the API):**
-1. <https://render.com> → *New → Web Service* → this repo.
-2. Build command `pip install -r requirements.txt`, start command `uvicorn main:app --host 0.0.0.0 --port $PORT`, health check path `/health`.
-3. Environment: `GEMINI_API_KEY`, `JOBGUARD_API_KEY` (any long random string), `JOBGUARD_CORS_ORIGINS` (your Streamlit URL), `JOBGUARD_LOG_PREDICTIONS=false`.
-4. Add to the Streamlit secrets: `JOBGUARD_API_URL = "https://<your-service>.onrender.com"` and the same `JOBGUARD_API_KEY`, then reboot the app. The sidebar should say *FastAPI backend connected*.
+Email and password accounts are stored in a local SQLite file, which hosted platforms with temporary disks reset on restart. Use Google sign-in there, or set `JOBGUARD_AUTH_DB_PATH` to a persistent disk.
 
-The free Render tier sleeps when idle (first request ~30-60 s; the dashboard falls back to its local model meanwhile) and has little RAM. Keep `JOBGUARD_API_KEY` set and `JOBGUARD_CORS_ORIGINS` limited to your dashboard URL.
+## Limitations and future work
 
-## Roadmap
+- **Dataset age and language.** EMSCAD is older, mostly English and US-centred. Scam patterns common in India differ, which is why the rule-based layer exists. The next step is to retrain on labelled Indian postings.
+- **Short input on scanned listings.** The scanner scores card text, not the full posting. Fetching each listing's detail page would improve the score at the cost of more requests.
+- **Evaluation.** The best model is selected on the test set, so the reported F1 is slightly optimistic, and near-duplicate postings in the dataset may appear on both sides of the split. A separate validation split and a duplicate-aware split are planned. The saved model was trained before TF-IDF fitting was moved to the training split only; retraining applies the change.
+- **Few positives.** 866 fraudulent postings in total, 173 in the test set, so metrics carry noticeable variance.
+- **Portal changes.** Scraper selectors depend on the portals' page structure and may need updates.
+- **Account recovery.** There is no password reset email yet.
+- **Planned.** Per-user history, a validation set of hand-labelled Indian scam messages to measure the rule layer, and calibrated decision thresholds.
 
-- Duplicate-aware re-split and retraining on Indian job postings
-- Fix and re-evaluate the XGBoost run
-- Recruiter reputation scoring and email-domain checks beyond free-mail detection
-- Multi-portal scraping and an ATS resume-compatibility checker
+JobGuard is an educational project, not a verdict. Always verify an employer through its official channels and report fraud at [cybercrime.gov.in](https://cybercrime.gov.in).
